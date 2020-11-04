@@ -1,4 +1,4 @@
-// Copyright 2019-2020 Intuitive Labs Gmbh. All rights reserved.
+// Copyright 2019-2020 Intuitive Labs GmbH. All rights reserved.
 //
 // Permission to use, copy, modify, and distribute this software for any
 // purpose with or without fee is hereby granted, provided that the above
