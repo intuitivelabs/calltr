@@ -1,3 +1,9 @@
+// // Copyright 2019-2020 Intuitive Labs Gmbh. All rights reserved.
+// //
+// // Use of this source code is governed by source-available license
+// // that can be found in the LICENSE file in the root of the source
+// // tree.
+
 package calltr
 
 import (
@@ -460,7 +466,7 @@ func (ed *EventData) String() string {
 
 // HandleEvF is a function callback that should handle a new CallEvent.
 // It should copy all the needed information from the passed CallEvent
-// structure, since the date _will_ be overwritten after the call
+// structure, since the data _will_ be overwritten after the call
 // (so all the []byte slices _must_ be copied if needed).
 type HandleEvF func(callev *EventData)
 
