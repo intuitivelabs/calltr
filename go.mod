@@ -1,4 +1,4 @@
-module andrei/calltr
+module github.com/intuitivelab/calltr
 
 go 1.15
 
