@@ -7,8 +7,8 @@
 package calltr
 
 import (
+	"github.com/intuitivelabs/bytescase"
 	"github.com/intuitivelabs/sipsp"
-	"github.com/intuitivelabs/sipsp/bytescase"
 )
 
 type TimeoutS uint32
