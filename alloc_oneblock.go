@@ -31,9 +31,9 @@ func init() {
 // AllocCallEntry allocates a CallEntry and the CalLEntry.Key.buf in one block.
 // The Key.buf will be keySize bytes length and info.buf infoSize.
 // It might return nil if the memory limits are exceeded.
-// Note: disabled for now, see AllocRegEntry_oneblock note about interaction
+// Note: disabled for now, see AllocRegEntry note about interaction
 // with the GC.
-func AllocCallEntry_oneblock(keySize, infoSize uint) *CallEntry {
+func AllocCallEntry(keySize, infoSize uint) *CallEntry {
 	var e CallEntry
 	CallEntryAllocStats.NewCalls.Inc(1)
 	callEntrySize := uint(unsafe.Sizeof(e))
@@ -73,8 +73,13 @@ func AllocCallEntry_oneblock(keySize, infoSize uint) *CallEntry {
 	n.Key.Init(buf[callEntrySize:(callEntrySize + keySize)])
 	n.Info.Init(buf[(callEntrySize + keySize):])
 	CallEntryAllocStats.TotalSize.Inc(uint(totalSize))
-	if int(totalSize)/AllocRoundTo < len(CallEntryAllocStats.Sizes) {
-		CallEntryAllocStats.Sizes[totalSize/AllocRoundTo].Inc(1)
+	// poolno -1 used for 0 allocs and poolno > len(poolBuffs) for big allocs
+	// that don't fit in the pools
+	pNo := int(totalSize/AllocRoundTo) - 1
+	if pNo >= 0 && pNo < len(CallEntryAllocStats.Sizes) {
+		CallEntryAllocStats.Sizes[pNo].Inc(1)
+	} else if pNo < 0 {
+		CallEntryAllocStats.ZeroSize.Inc(1)
 	} else {
 		CallEntryAllocStats.Sizes[len(CallEntryAllocStats.Sizes)-1].Inc(1)
 	}
@@ -83,12 +88,12 @@ func AllocCallEntry_oneblock(keySize, infoSize uint) *CallEntry {
 }
 
 // FreeCallEntry frees a CallEntry allocated with NewCallEntry.
-func FreeCallEntry_oneblock(e *CallEntry) {
+func FreeCallEntry(e *CallEntry) {
 	CallEntryAllocStats.FreeCalls.Inc(1)
 	callEntrySize := unsafe.Sizeof(*e)
 	totalSize := callEntrySize + uintptr(cap(e.Key.buf))
 	// sanity checks
-	if totalSize > callEntrySize &&
+	if len(e.Key.buf) != 0 &&
 		uintptr(unsafe.Pointer(e))+callEntrySize !=
 			uintptr(unsafe.Pointer(&e.Key.buf[0])) {
 		log.Panicf("FreeCallEntry called with call entry not allocated"+
@@ -116,7 +121,7 @@ func FreeCallEntry_oneblock(e *CallEntry) {
 // which are not seen by GC) => they might be freed "under us".
 // Solution: use C.malloc() or custom malloc and make sure no pointer
 // inside a RegEntry references any go alloc. stuff (since it won't be seen by GC).
-func allocRegEntry_oneblock(bufSize uint) *RegEntry {
+func AllocRegEntry(bufSize uint) *RegEntry {
 	var e RegEntry
 	RegEntryAllocStats.NewCalls.Inc(1)
 	regEntrySize := uint(unsafe.Sizeof(e))
@@ -149,8 +154,13 @@ func allocRegEntry_oneblock(bufSize uint) *RegEntry {
 	*n = e
 	n.buf = buf[regEntrySize:]
 	RegEntryAllocStats.TotalSize.Inc(uint(totalSize))
-	if int(totalSize)/AllocRoundTo < len(RegEntryAllocStats.Sizes) {
-		RegEntryAllocStats.Sizes[totalSize/AllocRoundTo].Inc(1)
+	// poolno -1 used for 0 allocs and poolno > len(poolBuffs) for big allocs
+	// that don't fit in the pools
+	pNo := int(totalSize/AllocRoundTo) - 1
+	if pNo >= 0 && pNo < len(RegEntryAllocStats.Sizes) {
+		RegEntryAllocStats.Sizes[pNo].Inc(1)
+	} else if pNo < 0 {
+		RegEntryAllocStats.ZeroSize.Inc(1)
 	} else {
 		RegEntryAllocStats.Sizes[len(RegEntryAllocStats.Sizes)-1].Inc(1)
 	}
@@ -162,14 +172,14 @@ func allocRegEntry_oneblock(bufSize uint) *RegEntry {
 }
 
 // FreeRegEntry frees a RegEntry allocated with NewRegEntry.
-// disabled see AllocRegEntry_oneblock
-func freeRegEntry_oneblock(e *RegEntry) {
+// disabled see AllocRegEntry
+func FreeRegEntry(e *RegEntry) {
 	//DBG("FreeRegEntry(%p)\n", e)
 	RegEntryAllocStats.FreeCalls.Inc(1)
 	regEntrySize := unsafe.Sizeof(*e)
 	totalSize := regEntrySize + uintptr(cap(e.buf))
 	// sanity checks
-	if totalSize > regEntrySize &&
+	if len(e.buf) != 0 &&
 		uintptr(unsafe.Pointer(e))+regEntrySize !=
 			uintptr(unsafe.Pointer(&e.buf[0])) {
 		log.Panicf("FreeRegEntry called with reg entry not allocated"+

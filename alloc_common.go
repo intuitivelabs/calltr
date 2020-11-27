@@ -44,6 +44,7 @@ type AllocStats struct {
 	NewCalls  StatCounter
 	FreeCalls StatCounter
 	Failures  StatCounter
+	ZeroSize  StatCounter // zero size allocs
 	Sizes     [MemPoolsNo + 1]StatCounter
 	PoolHits  [MemPoolsNo]StatCounter
 	PoolMiss  [MemPoolsNo]StatCounter

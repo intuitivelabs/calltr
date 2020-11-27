@@ -61,13 +61,22 @@ func AllocCallEntry(keySize, infoSize uint) *CallEntry {
 	n.Key.Init(buf[:keySize])
 	n.Info.Init(buf[keySize:])
 	CallEntryAllocStats.TotalSize.Inc(uint(totalBufSize + callEntrySize))
-	if int(totalBufSize)/AllocRoundTo < len(CallEntryAllocStats.Sizes) {
-		CallEntryAllocStats.Sizes[totalBufSize/AllocRoundTo].Inc(1)
+	// pool number: pool 0 contains AllocRoundTo size blocks,
+	// pool 1 2*AllocRoundTo size blocks  a.s.o.
+	// pool number -1: is for 0-length allocs
+	pNo := int(totalBufSize/AllocRoundTo) - 1
+	if pNo >= 0 && pNo < len(CallEntryAllocStats.Sizes) {
+		CallEntryAllocStats.Sizes[pNo].Inc(1)
+	} else if pNo < 0 {
+		CallEntryAllocStats.ZeroSize.Inc(1)
 	} else {
 		CallEntryAllocStats.Sizes[len(CallEntryAllocStats.Sizes)-1].Inc(1)
 	}
-	if int(callEntrySize)/AllocRoundTo < len(CallEntryAllocStats.Sizes) {
-		CallEntryAllocStats.Sizes[callEntrySize/AllocRoundTo].Inc(1)
+	sIdx := int(callEntrySize)/AllocRoundTo - 1
+	if sIdx >= 0 && sIdx < len(CallEntryAllocStats.Sizes) {
+		CallEntryAllocStats.Sizes[sIdx].Inc(1)
+	} else if sIdx < 0 {
+		CallEntryAllocStats.ZeroSize.Inc(1)
 	} else {
 		CallEntryAllocStats.Sizes[len(CallEntryAllocStats.Sizes)-1].Inc(1)
 	}
@@ -130,13 +139,22 @@ func AllocRegEntry(bufSize uint) *RegEntry {
 	)
 	regESz := unsafe.Sizeof(*n)
 	RegEntryAllocStats.TotalSize.Inc(uint(totalSize) + uint(regESz))
-	if int(totalSize)/AllocRoundTo < len(RegEntryAllocStats.Sizes) {
-		RegEntryAllocStats.Sizes[totalSize/AllocRoundTo].Inc(1)
+	// pool number: pool 0 contains AllocRoundTo size blocks,
+	// pool 1 2*AllocRoundTo size blocks  a.s.o.
+	// pool number -1: is for 0-length allocs
+	pNo := int(totalSize/AllocRoundTo) - 1
+	if pNo >= 0 && pNo < len(RegEntryAllocStats.Sizes) {
+		RegEntryAllocStats.Sizes[pNo].Inc(1)
+	} else if pNo < 0 {
+		RegEntryAllocStats.ZeroSize.Inc(1)
 	} else {
 		RegEntryAllocStats.Sizes[len(RegEntryAllocStats.Sizes)-1].Inc(1)
 	}
-	if int(regESz)/AllocRoundTo < len(RegEntryAllocStats.Sizes) {
-		RegEntryAllocStats.Sizes[regESz/AllocRoundTo].Inc(1)
+	sIdx := int(regESz)/AllocRoundTo - 1
+	if sIdx >= 0 && sIdx < len(RegEntryAllocStats.Sizes) {
+		RegEntryAllocStats.Sizes[sIdx].Inc(1)
+	} else if sIdx < 0 {
+		RegEntryAllocStats.ZeroSize.Inc(1)
 	} else {
 		RegEntryAllocStats.Sizes[len(RegEntryAllocStats.Sizes)-1].Inc(1)
 	}
