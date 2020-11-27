@@ -31,14 +31,14 @@ func TestCallStateAlloc(t *testing.T) {
 			t.Errorf("wrong buf size %d, expected at least %d\n",
 				len(e.Key.buf), sz)
 		}
-		/* usefull only in alloc_oneblock mode:
-		if len(e.Key.buf) != 0 &&
+		/* usefull only if everything is allocated into one block
+		(AllocCallsPerEntry == 1), e.g.  build with alloc_oneblock */
+		if AllocCallsPerEntry == 1 && len(e.Key.buf) != 0 &&
 			uintptr(unsafe.Pointer(&(e.Key.buf[0]))) !=
 				uintptr(unsafe.Pointer(e))+unsafe.Sizeof(*e) {
 			t.Errorf("wrong buffer offset %p, e = %p , sizeof(e)=%x\n",
 				&e.Key.buf[0], e, unsafe.Sizeof(*e))
 		}
-		*/
 		for j := 0; j < len(e.Key.buf); j++ {
 			e.Key.buf[j] = 0xff
 		}
@@ -56,5 +56,6 @@ func TestCallStateAlloc(t *testing.T) {
 		FreeCallEntry(ce[i])
 		ce[i] = nil
 	}
-	t.Logf("%d test runs\n", i)
+	t.Logf("%d test runs (alloc type %q build tags %v)\n", i,
+		AllocTypeName, BuildTags)
 }
