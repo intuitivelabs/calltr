@@ -16,6 +16,8 @@ import (
 	"time"
 )
 
+var BuildTags []string
+
 func DBG(f string, a ...interface{}) {
 	fmt.Printf("DBG: calltr: "+f, a...)
 }

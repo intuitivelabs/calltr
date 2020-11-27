@@ -4,7 +4,7 @@
 // that can be found in the LICENSE.txt file in the root of the source
 // tree.
 
-//+build default !alloc_pool,!alloc_oneblock
+//+build default alloc_simple !alloc_pool,!alloc_oneblock
 
 package calltr
 
@@ -15,7 +15,14 @@ import (
 	"unsafe"
 )
 
-const AllocCallsPerEntry = 2
+// build type constants
+const AllocType = AllocSimple        // build time alloc type
+const AllocTypeName = "alloc_simple" // alloc type as string
+const AllocCallsPerEntry = 2         // how many allocs for a CallEntry+buf
+
+func init() {
+	BuildTags = append(BuildTags, AllocTypeName)
+}
 
 // AllocCallEntry allocates a CallEntry and the corresp. CallEntry.Key.buf.
 // The Key.buf will be keySize bytes length and info.buf infoSize.

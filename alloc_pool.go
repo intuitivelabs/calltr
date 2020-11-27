@@ -17,7 +17,10 @@ import (
 	"unsafe"
 )
 
-const AllocCallsPerEntry = 2
+// build type constants
+const AllocType = AllocPool        // build time alloc type
+const AllocTypeName = "alloc_pool" // alloc type as string
+const AllocCallsPerEntry = 2       // how many allocs for a CallEntry+buf
 
 // array of sync.pool, each element containing a  pool of
 // raw buffer (&byte[0]) of size index * AllocRoundTo
@@ -28,6 +31,10 @@ var poolCallEntry sync.Pool
 
 // pool for allocating RegEntry
 var poolRegEntry sync.Pool
+
+func init() {
+	BuildTags = append(BuildTags, AllocTypeName)
+}
 
 // AllocCallEntry allocates a CallEntry and the CallEntry.Key.buf.
 // The Key.buf will be keySize bytes length and info.buf infoSize.

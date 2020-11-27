@@ -13,6 +13,18 @@ import (
 const AllocRoundTo = 16
 const MemPoolsNo = 1024
 
+// constants for recording the used alloc for testing/versioning
+const (
+	AllocSimple   = iota // simple. separate struct & common buf
+	AllocPool            // separate struct & buf, but use pools
+	AllocOneBlock        // struct & buf in one block
+)
+
+// each conditional build variant should define
+// const AllocType = ...
+// const AllocTypeName. = "..."
+// const AllocCallsPerEntry = N
+
 type StatCounter uint64
 
 func (c *StatCounter) Inc(v uint) uint64 {

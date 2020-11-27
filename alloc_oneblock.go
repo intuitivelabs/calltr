@@ -16,7 +16,14 @@ import (
 	"unsafe"
 )
 
-const AllocCallsPerEntry = 1
+// build type constants
+const AllocType = AllocOneBlock  // build time alloc type
+const AllocTypeName = "oneblock" // alloc type as string
+const AllocCallsPerEntry = 1     // how many allocs for a CallEntry+buf
+
+func init() {
+	BuildTags = append(BuildTags, AllocTypeName)
+}
 
 // Alloc functions that try to allocate Entry and buffer(s) into one
 // single contiguous memory block. Conditionally compiled.
