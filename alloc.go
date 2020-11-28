@@ -72,14 +72,6 @@ func AllocCallEntry(keySize, infoSize uint) *CallEntry {
 	} else {
 		CallEntryAllocStats.Sizes[len(CallEntryAllocStats.Sizes)-1].Inc(1)
 	}
-	sIdx := int(callEntrySize)/AllocRoundTo - 1
-	if sIdx >= 0 && sIdx < len(CallEntryAllocStats.Sizes) {
-		CallEntryAllocStats.Sizes[sIdx].Inc(1)
-	} else if sIdx < 0 {
-		CallEntryAllocStats.ZeroSize.Inc(1)
-	} else {
-		CallEntryAllocStats.Sizes[len(CallEntryAllocStats.Sizes)-1].Inc(1)
-	}
 	return n
 
 }
@@ -150,15 +142,6 @@ func AllocRegEntry(bufSize uint) *RegEntry {
 	} else {
 		RegEntryAllocStats.Sizes[len(RegEntryAllocStats.Sizes)-1].Inc(1)
 	}
-	sIdx := int(regESz)/AllocRoundTo - 1
-	if sIdx >= 0 && sIdx < len(RegEntryAllocStats.Sizes) {
-		RegEntryAllocStats.Sizes[sIdx].Inc(1)
-	} else if sIdx < 0 {
-		RegEntryAllocStats.ZeroSize.Inc(1)
-	} else {
-		RegEntryAllocStats.Sizes[len(RegEntryAllocStats.Sizes)-1].Inc(1)
-	}
-
 	//DBG("AllocRegEntry(%d) => %p\n", bufSize, n)
 	return n
 
