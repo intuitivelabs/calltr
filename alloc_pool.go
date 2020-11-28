@@ -136,7 +136,7 @@ func FreeCallEntry(e *CallEntry) {
 	// poolno -1 used for 0 allocs and poolno > len(poolBuffs) for big allocs
 	// that don't fit in the pools
 	if pNo >= 0 && pNo < len(poolBuffs) {
-		poolBuffs[totalBufSize/AllocRoundTo].Put(unsafe.Pointer(&e.Key.buf[0]))
+		poolBuffs[pNo].Put(unsafe.Pointer(&e.Key.buf[0]))
 	}
 	e.Key.buf = nil
 	e.Info.buf = nil
@@ -239,7 +239,7 @@ func FreeRegEntry(e *RegEntry) {
 	// poolno -1 used for 0 allocs and poolno > len(poolBuffs) for big allocs
 	// that don't fit in the pools
 	if pNo >= 0 && pNo < len(poolBuffs) {
-		poolBuffs[totalBufSize/AllocRoundTo].Put(unsafe.Pointer(&e.buf[0]))
+		poolBuffs[pNo].Put(unsafe.Pointer(&e.buf[0]))
 	}
 	e.buf = nil
 	*e = RegEntry{}           // DBG: zero it to force crashes on re-use w/o alloc
