@@ -819,7 +819,7 @@ func (c *CallEntry) Reset() {
 	buf2 := c.Info.buf
 	*c = CallEntry{}
 	c.Key.buf = buf
-	c.Info.buf = buf2[0:0]
+	c.Info.buf = buf2
 }
 
 /*
