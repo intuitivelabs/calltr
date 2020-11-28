@@ -992,3 +992,25 @@ func (n *NetInfo) Proto() NAddrFlags {
 func (n *NetInfo) ProtoName() string {
 	return n.Flags.ProtoName()
 }
+
+// Equal checks for equality (same protocol, ip type, port and address).
+func (n *NetInfo) Equal(o *NetInfo) bool {
+	if (n.Flags != o.Flags) || (n.Port != o.Port) {
+		return false
+	}
+	if n.Flags&NAddrIPv6 != 0 {
+		return bytes.Equal(n.IPAddr[:16], o.IPAddr[:16])
+	}
+	return bytes.Equal(n.IPAddr[:4], o.IPAddr[:4])
+}
+
+// EqualIP checks if the IP addresses are equal.
+func (n *NetInfo) EqualIP(o *NetInfo) bool {
+	if (n.Flags & NAddrIPv6) != (o.Flags & NAddrIPv6) {
+		return false
+	}
+	if n.Flags&NAddrIPv6 != 0 {
+		return bytes.Equal(n.IPAddr[:16], o.IPAddr[:16])
+	}
+	return bytes.Equal(n.IPAddr[:4], o.IPAddr[:4])
+}
