@@ -27,6 +27,7 @@ func TestCallStateAlloc(t *testing.T) {
 	for ; i < N; i++ {
 		sz := uint(rand.Intn(128))
 		e = AllocCallEntry(sz, 0)
+		e.Reset()
 		ce[i] = e
 		if len(e.Key.buf) < int(sz) {
 			t.Errorf("wrong buf size %d, expected at least %d\n",
@@ -66,7 +67,8 @@ func TestCallStateAlloc(t *testing.T) {
 func TestCallStateAllocLstGC(t *testing.T) {
 
 	//const N = 1000000
-	const N = 10
+	const N = 1000000
+	const GCRuns = 3 // consecutive GC runs to make sure everything was GCed
 	//var ce [N]*CallEntry
 	var lst CallEntryLst
 	var e *CallEntry //= AllocCallEntry(10, 0)
@@ -80,6 +82,7 @@ func TestCallStateAllocLstGC(t *testing.T) {
 	for ; i < N; i++ {
 		sz := uint(rand.Intn(128))
 		e = AllocCallEntry(sz, 0)
+		e.Reset()
 		if len(e.Key.buf) < int(sz) {
 			t.Errorf("wrong buf size %d, expected at least %d\n",
 				len(e.Key.buf), sz)
@@ -112,10 +115,13 @@ func TestCallStateAllocLstGC(t *testing.T) {
 				BadGCEntries++
 			}
 		})
+		e.hashNo = 0
 		lst.Insert(e)
 	}
 	t.Logf("list filled (%d elems) (before 1st forced GC)\n", i)
-	runtime.GC()
+	for n := 0; n < GCRuns; n++ {
+		runtime.GC()
+	}
 	if GCentries != 0 || BadGCEntries != 0 {
 		// if GC does not see our list elems as CallEntry => it will free
 		// all of them, except for the one pointed by lst.head and lst.prev
@@ -134,25 +140,21 @@ func TestCallStateAllocLstGC(t *testing.T) {
 		*/
 		return true
 	})
-	/*
-		for i = 0; i < N; i++ {
-			FreeCallEntry(ce[i])
-			ce[i] = nil
-		}
-	*/
 	t.Logf("after freeing lists (GCentries=%d/%d Bad=%d)\n",
 		GCentries, N, BadGCEntries)
-	runtime.GC()
-	if AllocType == AllocPool {
-		// run GC() a 2nd time to force sync.pool emptrying:
-		// pool use a 2-level caching of used blocks: a local per
-		// processor and a victim "cache".
-		// On each GC() cycle the victim cache is emptied (GCed) and
-		// the local blocks are moved to victim so to completely empty a
-		// pool 2 GC() runs are needed.
-		t.Logf("before final GC in pool mode (GCentries=%d/%d Bad=%d)\n",
-			GCentries, N, BadGCEntries)
-		runtime.GC() // 2nd time to force pool emptying
+	for n := 0; n < GCRuns; n++ {
+		runtime.GC()
+		if AllocType == AllocPool {
+			// run GC() a 2nd time to force sync.pool emptrying:
+			// pool use a 2-level caching of used blocks: a local per
+			// processor and a victim "cache".
+			// On each GC() cycle the victim cache is emptied (GCed) and
+			// the local blocks are moved to victim so to completely empty a
+			// pool 2 GC() runs are needed.
+			t.Logf("before final GC in pool mode (GCentries=%d/%d Bad=%d)\n",
+				GCentries, N, BadGCEntries)
+			runtime.GC() // 2nd time to force pool emptying
+		}
 	}
 	t.Logf("after final force GC (GCentries=%d/%d Bad=%d)\n",
 		GCentries, N, BadGCEntries)
