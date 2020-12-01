@@ -65,7 +65,7 @@ func hash2Finish(h uint32) uint32 {
 }
 
 // GetHash is a fast hash function optimized for strings.
-// It will return the hash of  buf[offs:l].
+// It will return the hash of  buf[offs:offs+l].
 // It should be used only for building hash tables (it has no
 // cryptographic value).
 // It's  ported from ser C version.
