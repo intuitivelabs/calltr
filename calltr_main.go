@@ -883,6 +883,7 @@ func CallEntriesStatsHash(hs *HStats) uint64 {
 	var total uint64
 	var max uint64
 	var min uint64
+	min = ^(uint64(0))
 	for i := 0; i < len(cstHash.HTable); i++ {
 		cstHash.HTable[i].Lock()
 		n := uint64(cstHash.HTable[i].entries)
@@ -907,6 +908,7 @@ func RegEntriesStatsHash(hs *HStats) uint64 {
 	var total uint64
 	var max uint64
 	var min uint64
+	min = ^(uint64(0))
 	for i := 0; i < len(regHash.HTable); i++ {
 		regHash.HTable[i].Lock()
 		n := uint64(regHash.HTable[i].entries)
