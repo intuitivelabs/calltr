@@ -69,6 +69,7 @@ type EvRate struct {
 	Updated time.Time
 	lastV   uint64 // value at the Updated time
 	Rate    float64
+	Delta   time.Duration // time on which the rate is calculated
 }
 
 // ComputeRate computes the current rate if more then delta elapsed since
@@ -85,6 +86,24 @@ func (r *EvRate) ComputeRate(v uint64, crtT time.Time, delta time.Duration) (boo
 			return true, rate
 		}
 	}
+	// if rate calculation interval (delta) changed and not enough time
+	// passed to recalculate on the whole new interval:
+	//   - new interval > old interval (one for which we have r.Rate)
+	//     => return old_rate + messages arrived so far
+	//   - new interval < old interval
+	//     => return messages arrived so far
+	//          (or possibly old_rate*(new_int/old_int))
+	if delta != r.Delta {
+		if delta > r.Delta {
+			return false, r.Rate + float64(v-r.lastV)
+		} else { // delta < r.Delta
+			return false, float64(v - r.lastV)
+		}
+	}
+	// if interval did not change, but less then delta passed since the
+	// last rate computation => return last rate or if more messages were
+	// received so far then the last rate, return the current count.
+	// (return peak rate(old_rate, crt))
 	if r.Rate < float64(v-r.lastV) {
 		return false, float64(v - r.lastV)
 	}
@@ -103,12 +122,14 @@ func (r *EvRate) Update(v uint64, crtT, t0 time.Time, delta time.Duration) (bool
 		r.lastV = 0
 		r.Rate = 0
 		//r.Rate = float64(v)
+		r.Delta = delta
 	}
 	ok, rate := r.ComputeRate(v, crtT, delta)
 	if ok {
 		r.Rate = rate
 		r.Updated = crtT
 		r.lastV = v
+		r.Delta = delta
 	}
 	return ok, rate
 }
@@ -257,8 +278,12 @@ func (er *EvRateEntry) GetRate(rIdx int, crtT time.Time, maxRates *EvRateMaxes) 
 			// not initialized yet (not enough time passed?)
 			return true, float64(er.N)
 		}
+		delta := er.Rates[rIdx].Delta
+		if maxRates != nil && rIdx < len(maxRates) {
+			delta = maxRates[rIdx].Intvl
+		}
 		// compute actual rate if more then delta since last update:
-		_, rate := er.Rates[rIdx].ComputeRate(er.N, crtT, EvRateInts[rIdx])
+		_, rate := er.Rates[rIdx].ComputeRate(er.N, crtT, delta)
 		return true, rate
 	}
 	return false, float64(er.N)

@@ -680,10 +680,12 @@ func (h *EvRateHash) PrintFilter(w io.Writer, start, max int,
 					if idx == rateIdx {
 						mark = "*"
 					}
-					fmt.Fprintf(w, "      %srate%d: %f(%f) / %v (u: %v ago)\n",
+					fmt.Fprintf(w, "      %srate%d: %f(%f) / %v (%v)"+
+						" (u: %v ago)\n",
 						mark, idx, cr,
 						e.Rates[idx].Rate,
-						EvRateInts[idx],
+						h.maxEvRates[idx].Intvl,
+						e.Rates[idx].Delta,
 						now.Sub(e.Rates[idx].Updated))
 				}
 			}
