@@ -15,11 +15,53 @@ import (
 
 const NEvRates = 3 // number of event rate intervals
 
-// EvRateInts holds all the time intervals for which event rates are computed.
-var EvRateInts = [NEvRates]time.Duration{
-	1 * time.Second,
-	1 * time.Minute,
-	1 * time.Hour,
+// EvRateMax holds the maximum rate and the interval on which to compute it.
+type EvRateMax struct {
+	Max   float64       // maximum rate value
+	Intvl time.Duration // interval for value computation
+}
+
+// EvRateMaxes is an array of EvRateMax that holds all the rates that should
+// be checked.
+type EvRateMaxes [NEvRates]EvRateMax
+
+// InitRateMaxes initialises an EvRateMaxes array based on an array of
+//  max values and an array of time intervals on which the rate values should
+// be calculated.
+func InitEvRateMaxes(em *EvRateMaxes,
+	maxes *[NEvRates]float64, intvls *[NEvRates]time.Duration) {
+	for i := 0; i < len(*em); i++ {
+		em[i].Max = maxes[i]
+		em[i].Intvl = intvls[i]
+	}
+}
+
+// Get returns the rate at the specified index.
+// It returns true and the rate on success and false and EvRateMax{} on
+// error (index out of range).
+func (em EvRateMaxes) Get(idx int) (bool, EvRateMax) {
+	if idx >= 0 && idx < len(em) {
+		return true, em[idx]
+	}
+	return false, EvRateMax{}
+}
+
+// GetMRate returns the rate limit part for the maximum rate at index idx.
+// On error (idx out of range), it returns -1.
+func (em EvRateMaxes) GetMRate(idx int) float64 {
+	if idx >= 0 && idx < len(em) {
+		return em[idx].Max
+	}
+	return -1
+}
+
+// GetIntvl returns the interval for the max rate at idx.
+// On error (idx out of range), it returns 0.
+func (em EvRateMaxes) GetIntvl(idx int) time.Duration {
+	if idx >= 0 && idx < len(em) {
+		return em[idx].Intvl
+	}
+	return 0
 }
 
 // EvRate holds an event rate for a specific interval.
@@ -132,21 +174,25 @@ func (er *EvRateEntry) Unref() bool {
 }
 
 // UpdateRates update all the rates for a specific event and checks if any
-// of the maxRates[] was exceeded.
+// of the maxRates[] was exceeded. The event counters (exceeded or ok events)
+// are updated with evCntUpd. evCntUpd should be 0 if UpdateRates was not
+// called due to a new event (e.g. called on timer or during GC).
 // The rate exceeded state is recorded in a EcExcInfo structure that will
 //  be returned.
 // The return values are:  the index of the exceeded rate (-1 if nothing was
 //  exceeded), the current computed value for the rate that was exceeded (0
 // if not) and the exceeded state (in a EvExcInfo structure).
-func (er *EvRateEntry) UpdateRates(crtT time.Time, maxRates []float64) (int, float64, EvExcInfo) {
+func (er *EvRateEntry) UpdateRates(crtT time.Time, maxRates *EvRateMaxes,
+	evCntUpd uint) (int, float64, EvExcInfo) {
+
 	stateChg := false
 	exceeded := false
 	rateIdx := -1
 	exRate := float64(0)
-	for i := 0; i < len(er.Rates); i++ {
-		_, rate := er.Rates[i].Update(er.N, crtT, er.T0, EvRateInts[i])
-		if i < len(maxRates) {
-			if rate > maxRates[i] && maxRates[i] != 0 {
+	for i := 0; i < len(maxRates) && i < len(er.Rates); i++ {
+		if maxRates[i].Intvl != 0 {
+			_, rate := er.Rates[i].Update(er.N, crtT, er.T0, maxRates[i].Intvl)
+			if rate > maxRates[i].Max && maxRates[i].Max != 0 {
 				if !exceeded {
 					// record first exceeded index and rate
 					rateIdx = i
@@ -161,23 +207,23 @@ func (er *EvRateEntry) UpdateRates(crtT time.Time, maxRates []float64) (int, flo
 		if er.exState.Exceeded {
 			// changed from Exceeded to OK
 			er.exState.Exceeded = false
-			er.exState.OkConseq = 1
+			er.exState.OkConseq = uint64(evCntUpd)
 			er.exState.ExChgT = crtT
 			er.exState.ExLastT = crtT
 		} else {
 			// changed from Ok to Exceeded
 			er.exState.Exceeded = true
 			er.exState.ExRateId = uint8(rateIdx)
-			er.exState.ExConseq = 1
+			er.exState.ExConseq = uint64(evCntUpd)
 			er.exState.ExChgT = crtT
 		}
 	} else {
 		// no state change
 		if er.exState.Exceeded {
-			er.exState.ExConseq++
+			er.exState.ExConseq += uint64(evCntUpd)
 			er.exState.ExLastT = crtT
 		} else {
-			er.exState.OkConseq++
+			er.exState.OkConseq += uint64(evCntUpd)
 			er.exState.OkLastT = crtT
 		}
 	}
@@ -192,14 +238,20 @@ func (er *EvRateEntry) Inc() {
 
 // IncUpdateR incrementes the ev no and updates the rates.
 // See UpdateRates() for the parameter and return values.
-func (er *EvRateEntry) IncUpdateR(crtT time.Time, maxRates []float64) (int, float64, EvExcInfo) {
+func (er *EvRateEntry) IncUpdateR(crtT time.Time, maxRates *EvRateMaxes) (int, float64, EvExcInfo) {
 	er.Inc()
-	return er.UpdateRates(crtT, maxRates)
+	return er.UpdateRates(crtT, maxRates, 1)
 }
 
 // GetRate returns the rate at rIdx.
+// The parameters are: rIdx, the index of the requested rate
+//                     crtT  the current time
+//                     maxRates an array with  max rate/interval pairs of which
+//                              only the interval part is used to compute the
+//                              current rate. Can be nil (in this case the
+//                              current interval saved inside er will be used.
 // It returns true and value on success, false on error.
-func (er *EvRateEntry) GetRate(rIdx int, crtT time.Time) (bool, float64) {
+func (er *EvRateEntry) GetRate(rIdx int, crtT time.Time, maxRates *EvRateMaxes) (bool, float64) {
 	if rIdx < len(er.Rates) {
 		if er.Rates[rIdx].Updated.IsZero() {
 			// not initialized yet (not enough time passed?)
@@ -237,8 +289,12 @@ func (er *EvRateEntry) Copy(src *EvRateEntry) {
 //		 net    - check against IPNet, ignored if nil
 //		 re     - check IP agains regex, ignored if nil
 //		 crtT   - current time for computing/getting rates
+//		 maxRates - rate/interval array [NEvRates], of which only the
+//		            interval part is used to compute the current rate.
+//		            Can be nil (the last/current interval will be used).
 func (er *EvRateEntry) matchEvRateEntry(val int, rateIdx, rateVal int,
-	net *net.IPNet, re *regexp.Regexp, crtT time.Time) bool {
+	net *net.IPNet, re *regexp.Regexp, crtT time.Time,
+	maxRates *EvRateMaxes) bool {
 
 	if val >= 0 && !(er.exState.Exceeded == (val > 0)) {
 		return false
@@ -247,7 +303,7 @@ func (er *EvRateEntry) matchEvRateEntry(val int, rateIdx, rateVal int,
 		return false
 	}
 	if rateIdx >= 0 && !crtT.IsZero() {
-		ok, cr := er.GetRate(rateIdx, crtT)
+		ok, cr := er.GetRate(rateIdx, crtT, maxRates)
 		if !ok {
 			return false
 		}

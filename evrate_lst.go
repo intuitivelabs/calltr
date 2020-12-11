@@ -17,6 +17,14 @@ import (
 	"time"
 )
 
+// EvRateDefaultIntvls holds the default time intervals for which event rates
+// are computed.
+var EvRateDefaultIntvls = [NEvRates]time.Duration{
+	1 * time.Second,
+	1 * time.Minute,
+	1 * time.Hour,
+}
+
 // EvRateEntryLst holds a list of EvRateEntry.
 // Is used as the EvRateHash bucket head list.
 type EvRateEntryLst struct {
@@ -141,6 +149,7 @@ type EvRateHash struct {
 	// GC pos inside the bucket list of the last processed element
 	gcBpos uint32
 
+	maxEvRates   EvRateMaxes // (max rate, interval) pairs table
 	ForceGCtimeL []time.Duration
 	ForceGCrunL  []time.Duration
 	LightGCtimeL time.Duration
@@ -161,11 +170,13 @@ func (h *EvRateHash) Hash(src *NetInfo, Ev EventType) uint32 {
 }
 
 // Init initializes the hash table.
-// The parameters are the hash table bucket number and the target
+// The parameters are the hash table bucket number, the target
 // maximum entries (if exceeded hard GC would be force-run immediately in
 // an attempt to reduce the hash entries to h.targetMax; if not enough
-// space was created => discard new entries).
-func (h *EvRateHash) Init(sz, maxEntries uint) {
+// space was created => discard new entries) and a table with the
+//  NEvRates max_rate,interval pairs (each rate is computed on the specified
+//  interval and compared against the corresponding max_rate).
+func (h *EvRateHash) Init(sz, maxEntries uint, maxRates *EvRateMaxes) {
 	h.HTable = make([]EvRateEntryLst, sz)
 	for i := 0; i < len(h.HTable); i++ {
 		h.HTable[i].Init()
@@ -183,6 +194,14 @@ func (h *EvRateHash) Init(sz, maxEntries uint) {
 	// light GC  lifetime limit and runtime
 	h.LightGCtimeL = 15 * time.Minute
 	h.LightGCrunL = 2 * time.Millisecond
+	if maxRates == nil {
+		for i, v := range EvRateDefaultIntvls {
+			h.maxEvRates[i].Max = 0
+			h.maxEvRates[i].Intvl = v
+		}
+	} else {
+		h.maxEvRates = *maxRates // copy rates array
+	}
 }
 
 // Destroy frees/unref everything in the hash table.
@@ -208,6 +227,58 @@ func (h *EvRateHash) CrtEntries() uint64 {
 // MaxEntries returns the maximum number of entries in the hash.
 func (h *EvRateHash) MaxEntries() uint64 {
 	return uint64(h.maxEntries)
+}
+
+// GetMaxRates returns a pointer to the internal max rates array.
+func (h *EvRateHash) GetMaxRates() *EvRateMaxes {
+	return &h.maxEvRates
+}
+
+// SetMaxRates replaces the internal max rates with a new array.
+func (h *EvRateHash) SetMaxRates(maxRates *EvRateMaxes) {
+	h.maxEvRates = *maxRates
+}
+
+// SetMaxRates2 changes the internal max rates / intvls array
+// using 2 arrays. one with the max values and one with the
+// corresponding intervals.
+func (h *EvRateHash) SetMaxRates2(maxes *[NEvRates]float64,
+	intvls *[NEvRates]time.Duration) {
+	InitEvRateMaxes(&h.maxEvRates, maxes, intvls)
+}
+
+// GetRateIntvl returns the interval at which the rate number idx is
+// calculated. If idx is out if range it always returns 0.
+func (h *EvRateHash) GetRateIntvl(idx int) time.Duration {
+	return h.maxEvRates.GetIntvl(idx)
+}
+
+// GetRateMax returns the maximum value for the rate number idx.
+// If the rate becomes higher then this value, then it will marked
+// as exceeded (blacklisted).
+// If idx is out of range it will return a negative value.
+func (h *EvRateHash) GetRateMax(idx int) float64 {
+	return h.maxEvRates.GetMRate(idx)
+}
+
+// SetRateIntvl sets a new interval for computing the rate number idx.
+func (h *EvRateHash) SetRateIntvl(idx int, intvl time.Duration) bool {
+	if idx >= 0 && idx < len(h.maxEvRates) {
+		h.maxEvRates[idx].Intvl = intvl
+		return true
+	}
+	return false
+}
+
+// SetRateMax sets a new maximum value for the rate number idx.
+// If the rate becomes higher then this value, then it will marked
+// as exceeded (blacklisted).
+func (h *EvRateHash) SetRateMax(idx int, maxv float64) bool {
+	if idx >= 0 && idx < len(h.maxEvRates) {
+		h.maxEvRates[idx].Max = maxv
+		return true
+	}
+	return false
 }
 
 // Get searches for a matching entry and copies it in dst (if found).
@@ -243,7 +314,7 @@ func (h *EvRateHash) hardGC(target uint, now time.Time) (bool, uint, bool) {
 			runLim = now.Add(h.ForceGCrunL[len(h.ForceGCrunL)-1])
 		}
 		ok, n, to = h.ForceEvict(uint64(target), false,
-			eLim, runLim)
+			now, eLim, runLim)
 		if ok {
 			break
 		}
@@ -256,22 +327,20 @@ func (h *EvRateHash) hardGC(target uint, now time.Time) (bool, uint, bool) {
 func (h *EvRateHash) lightGC(target uint, now time.Time) (bool, uint, bool) {
 	eLim := now.Add(-h.LightGCtimeL)
 	runLim := now.Add(h.LightGCrunL)
-	return h.ForceEvict(uint64(target), false, eLim, runLim)
+	return h.ForceEvict(uint64(target), false, now, eLim, runLim)
 }
 
 // IncUpdate will search and update the entry in the hash corresponding
 // to (ev, src).
-// crtT should contain the time when this function is run and maxRates a slice
-// of max rates to check against (corresponding to the intervals in
-// EvRateInts[]).
+// crtT should contain the time when this function is run.
 // The return values are: - a bool which is true on success (updated existing
 // entry or created new one) of false on failure (could not create new entry).
 //                        - the index of the exceeded rate (-1 if none was
 //                          exceeded
 //                        - the current value of the exceeded rate (or 0.0)
 //                        - the rate exceeded info/state (EvExcInfo)
-func (h *EvRateHash) IncUpdate(ev EventType, src *NetInfo, crtT time.Time,
-	maxRates []float64) (bool, int, float64, EvExcInfo) {
+func (h *EvRateHash) IncUpdate(ev EventType, src *NetInfo,
+	crtT time.Time) (bool, int, float64, EvExcInfo) {
 	var rIdx int
 	var cRate float64
 	var info EvExcInfo
@@ -281,7 +350,7 @@ func (h *EvRateHash) IncUpdate(ev EventType, src *NetInfo, crtT time.Time,
 	e := h.HTable[i].FindUnsafe(ev, src)
 	if e != nil {
 		// found: update rate, unlock  & return
-		rIdx, cRate, info = e.IncUpdateR(crtT, maxRates)
+		rIdx, cRate, info = e.IncUpdateR(crtT, &h.maxEvRates)
 		h.HTable[i].Unlock()
 		return true, rIdx, cRate, info
 	}
@@ -342,12 +411,12 @@ func (h *EvRateHash) IncUpdate(ev EventType, src *NetInfo, crtT time.Time,
 	n.Ev = ev
 	n.T0 = crtT
 	n.Ref()
-	rIdx, cRate, info = n.IncUpdateR(crtT, maxRates)
+	rIdx, cRate, info = n.IncUpdateR(crtT, &h.maxEvRates)
 	h.HTable[i].Lock()
 	// retry in case it was added in the meantime
 	e = h.HTable[i].FindUnsafe(ev, src)
 	if e != nil {
-		rIdx, cRate, info = e.IncUpdateR(crtT, maxRates)
+		rIdx, cRate, info = e.IncUpdateR(crtT, &h.maxEvRates)
 		h.HTable[i].Unlock()
 		// already added => drop n
 		n.Unref()        // handled inside Unref(): FreeEvRateEntry(n)
@@ -419,7 +488,7 @@ func (h *EvRateHash) getNextExceededLock(bIdx, bPos uint, val bool) (*EvRateEntr
 	return nil, 0, 0
 }
 
-// evictList  removes and unrefs elements from the given list that match
+// evictLst  removes and unrefs elements from the given list that match
 // the passed exceeded val and are older then mark.
 // It stops if the target hash entries was met, it exceeded the run time
 // limit rLim, it walked more then maxE elements or if it walked the whole
@@ -430,13 +499,15 @@ func (h *EvRateHash) getNextExceededLock(bIdx, bPos uint, val bool) (*EvRateEntr
 // returns target_met, walked_entries_no, timeout
 func (h *EvRateHash) evictLst(val bool, mark time.Time,
 	first *EvRateEntry, lst *EvRateEntryLst, maxE uint,
-	target uint64, rLim time.Time, chkto, chkoffs uint) (bool, uint, bool) {
+	target uint64, rLim time.Time, chkto, chkoffs uint,
+	crtT time.Time) (bool, uint, bool) {
 
 	n := uint(0)
 	for e, nxt := first, first.next; e != &lst.head; e, nxt = nxt, nxt.next {
 		// TODO: add more conditions, e.g. create time
-		// TODO: if Exceeded and last update old, try to re-update rates,
-		//        maybe it's not exceeded anymore
+
+		// update the state, before checking if exceeded
+		e.UpdateRates(crtT, &h.maxEvRates, 0)
 		if e.exState.Exceeded == val &&
 			(mark.IsZero() || mark.After(e.T0)) {
 
@@ -466,7 +537,7 @@ func (h *EvRateHash) evictLst(val bool, mark time.Time,
 // the number of "walked" entries and whether or not it ended due to
 // timeout (rLim exceeded).
 func (h *EvRateHash) ForceEvict(target uint64, val bool,
-	eLim, rLim time.Time) (bool, uint, bool) {
+	crtT, eLim, rLim time.Time) (bool, uint, bool) {
 	const ChkT = 10000 // how often to check time
 	var ok, to bool
 	var n uint
@@ -490,7 +561,7 @@ func (h *EvRateHash) ForceEvict(target uint64, val bool,
 	lst = &h.HTable[b]
 	// lst is already locked here by h.getNextExceededLock(...)
 	ok, n, to = h.evictLst(val, eLim, e, lst, ^uint(0), /* all  elems*/
-		target, rLim, ChkT, total)
+		target, rLim, ChkT, total, crtT)
 	p += uint(n)
 	lst.Unlock()
 	// time limit check
@@ -518,7 +589,7 @@ func (h *EvRateHash) ForceEvict(target uint64, val bool,
 		if lst.entries.Get() > 0 { // race, but we don't care
 			lst.Lock()
 			ok, n, to = h.evictLst(val, eLim, lst.head.next, lst, ^uint(0),
-				target, rLim, ChkT, total)
+				target, rLim, ChkT, total, crtT)
 			lst.Unlock()
 			total += n
 			if ok || to {
@@ -537,7 +608,7 @@ func (h *EvRateHash) ForceEvict(target uint64, val bool,
 		if lst.entries.Get() > 0 { // race, but we don't care
 			lst.Lock()
 			ok, n, to = h.evictLst(val, eLim, lst.head.next, lst, uint(bPos0),
-				target, rLim, ChkT, total)
+				target, rLim, ChkT, total, crtT)
 			lst.Unlock()
 			total += n
 			if ok || to {
@@ -594,7 +665,8 @@ func (h *EvRateHash) PrintFilter(w io.Writer, start, max int,
 		lst := &h.HTable[i]
 		lst.Lock()
 		for e := lst.head.next; e != &lst.head; e = e.next {
-			print := e.matchEvRateEntry(val, rateIdx, rateVal, net, re, now)
+			print := e.matchEvRateEntry(val, rateIdx, rateVal, net, re, now,
+				&h.maxEvRates)
 			if print && n >= start {
 				printed++
 				fmt.Fprintf(w, "%6d. %s:%s N: %6d v:%v  created %v (%v ago)"+
@@ -602,8 +674,8 @@ func (h *EvRateHash) PrintFilter(w io.Writer, start, max int,
 					n, e.Ev, e.Src.IP(), e.N, e.exState.Exceeded,
 					e.T0, now.Sub(e.T0))
 				fmt.Fprintf(w, "       state: %#v\n", e.exState)
-				for idx := 0; idx < len(EvRateInts); idx++ {
-					_, cr := e.GetRate(idx, now)
+				for idx := 0; idx < len(h.maxEvRates); idx++ {
+					_, cr := e.GetRate(idx, now, &h.maxEvRates)
 					mark := " "
 					if idx == rateIdx {
 						mark = "*"
