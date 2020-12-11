@@ -551,7 +551,9 @@ func (h *EvRateHash) ForceEvict(target uint64, val bool,
 
 	total := uint(0) // total entries walked
 	/// get next non rate-exceeded element, >bPos0
-	e, b, p := h.getNextExceededLock(uint(h.gcBidx), uint(h.gcBpos), false)
+	//e, b, p := h.getNextExceededLock(uint(h.gcBidx), uint(h.gcBpos), false)
+	// get next element after element at h.gcBidx, h.gcBpos:
+	e, b, p := h.getNextElLock(uint(h.gcBidx), uint(h.gcBpos))
 	if e == nil {
 		ok = false
 		goto end_unlocked
