@@ -7,6 +7,7 @@
 package calltr
 
 import (
+	"fmt"
 	"net"
 	"regexp"
 	"sync/atomic"
@@ -162,6 +163,20 @@ func FillEvRateInfo(ri *EvRateInfo, exInfo *EvExcInfo,
 	ri.Rate = rate
 	ri.MaxR = maxr
 	ri.Intvl = intvl
+}
+
+// String implements the string interface.
+func (e EvExcInfo) String() string {
+	now := time.Now()
+	s := fmt.Sprintf("exceeded: %v rate_id: %d ex: %d ok: %d"+
+		" ExChgT: %s ago  ExLastT: %s"+
+		" OkLastT: %s",
+		e.Exceeded, e.ExRateId, e.ExConseq, e.OkConseq,
+		now.Sub(e.ExChgT).Truncate(time.Second),
+		e.ExLastT.Truncate(time.Second),
+		e.OkLastT.Truncate(time.Second),
+	)
+	return s
 }
 
 // EvRateEntry holds the rate at which an event from a source is generated.

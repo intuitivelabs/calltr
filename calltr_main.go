@@ -667,6 +667,7 @@ errorLocked:
 func Track(m *sipsp.PSIPMsg, n *[2]NetInfo, f HandleEvF) bool {
 	var evd *EventData
 	if f != nil {
+		// TODO: most likely on the heap (due to f(evd)) => sync.pool
 		var buf = make([]byte, EventDataMaxBuf())
 		evd = &EventData{}
 		evd.Init(buf)

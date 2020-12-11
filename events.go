@@ -459,6 +459,11 @@ func (ed *EventData) String() string {
 				CallAttrIdx(i), ed.Attrs[i].Get(ed.Buf))
 		}
 	}
+	s += fmt.Sprintf("	blacklisted: %v (%d) rate: %f / %f per %v\n"+
+		"	blacklisted: same state since: %s\n",
+		ed.Rate.ExCnt != 0, ed.Rate.ExCnt,
+		ed.Rate.Rate, ed.Rate.MaxR, ed.Rate.Intvl,
+		ed.Rate.T.Truncate(time.Second))
 	s += fmt.Sprintf("	DBG: state: %q  pstate: %q\n", ed.State, ed.PrevState.String())
 	s += fmt.Sprintf("	DBG: fromTag: %q toTag: %q\n",
 		ed.FromTag.Get(ed.Buf), ed.ToTag.Get(ed.Buf))

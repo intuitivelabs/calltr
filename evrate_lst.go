@@ -678,26 +678,31 @@ func (h *EvRateHash) PrintFilter(w io.Writer, start, max int,
 				&h.maxEvRates)
 			if print && n >= start {
 				printed++
-				fmt.Fprintf(w, "%6d. %s:%s N: %6d v:%v  created %v (%v ago)"+
+				fmt.Fprintf(w, "%6d. %s:%s N: %6d v:%v  created %s (%s ago)"+
 					"\n",
 					n, e.Ev, e.Src.IP(), e.N, e.exState.Exceeded,
-					e.T0, now.Sub(e.T0))
-				fmt.Fprintf(w, "       state: %#v\n", e.exState)
+					e.T0.Truncate(time.Second),
+					now.Sub(e.T0).Truncate(time.Second))
+				fmt.Fprintf(w, "       state: %s\n", e.exState)
 				for idx := 0; idx < len(h.maxEvRates); idx++ {
 					_, cr := e.GetRate(idx, now, &h.maxEvRates)
 					mark := " "
-					if idx == rateIdx {
+					if e.exState.Exceeded && idx == int(e.exState.ExRateId) {
 						mark = "*"
 					}
-					fmt.Fprintf(w, "      %srate%d: %f(%f) / %v (%v)"+
+					if idx == rateIdx {
+						mark = "!"
+					}
+					fmt.Fprintf(w, "      %srate%d: %f(old: %f) / %v (%v)"+
 						" (u: %v ago)\n",
 						mark, idx, cr,
 						e.Rates[idx].Rate,
 						h.maxEvRates[idx].Intvl,
 						e.Rates[idx].Delta,
-						now.Sub(e.Rates[idx].Updated))
+						now.Sub(e.Rates[idx].Updated).Truncate(time.Second))
 				}
 			}
+			fmt.Fprintln(w)
 			n++
 			if printed > max {
 				lst.Unlock()
