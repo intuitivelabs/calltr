@@ -253,12 +253,19 @@ func (h *EvRateHash) GetRateIntvl(idx int) time.Duration {
 	return h.maxEvRates.GetIntvl(idx)
 }
 
-// GetRateMax returns the maximum value for the rate number idx.
+// GetRateMaxVal returns the maximum value for the rate number idx.
 // If the rate becomes higher then this value, then it will marked
 // as exceeded (blacklisted).
 // If idx is out of range it will return a negative value.
-func (h *EvRateHash) GetRateMax(idx int) float64 {
+func (h *EvRateHash) GetRateMaxVal(idx int) float64 {
 	return h.maxEvRates.GetMRate(idx)
+}
+
+// GetRateMax returns the maximum value for the rate number idx
+// and the interval in an EvRateMax struct.
+// On failure it returns false, EvRateMax{}.
+func (h *EvRateHash) GetRateMax(idx int) (bool, EvRateMax) {
+	return h.maxEvRates.Get(idx)
 }
 
 // SetRateIntvl sets a new interval for computing the rate number idx.

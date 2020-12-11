@@ -146,6 +146,19 @@ func (p EvGenPos) String() string {
 	return "unknown"
 }
 
+// EvRateInfo holds the event rate generation and blacklist status.
+type EvRateInfo struct {
+	// how many times the rate was exceeded consecutively
+	// (0 if not exceeded)
+	ExCnt uint64
+	Rate  float64       // current rate value
+	MaxR  float64       // rate that was exceeded
+	Intvl time.Duration // interval for the rate
+	// when the rate was exceeded the first time or if not exceeded
+	// (ExCnt == 0), the time since the rate is ok
+	T time.Time
+}
+
 type EventData struct {
 	Type       EventType
 	Truncated  bool
@@ -160,6 +173,8 @@ type EventData struct {
 	ReplStatus uint16
 	CallID     sipsp.PField
 	Attrs      [AttrLast]sipsp.PField
+
+	Rate EvRateInfo // event generation rate/blacklisted status
 
 	// debugging
 	ForkedTS   time.Time

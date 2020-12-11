@@ -149,6 +149,21 @@ type EvExcInfo struct {
 	OkLastT  time.Time // time of the last ok update (no rate exceeded)
 }
 
+// FillEvRateInfo fills a EvRateInfo structure from an EvExcInfo,
+//  current rate, max rate and the rate interval.
+func FillEvRateInfo(ri *EvRateInfo, exInfo *EvExcInfo,
+	rate, maxr float64, intvl time.Duration) {
+	if exInfo.Exceeded {
+		ri.ExCnt = exInfo.ExConseq
+	} else {
+		ri.ExCnt = 0
+	}
+	ri.T = exInfo.ExChgT
+	ri.Rate = rate
+	ri.MaxR = maxr
+	ri.Intvl = intvl
+}
+
 // EvRateEntry holds the rate at which an event from a source is generated.
 type EvRateEntry struct {
 	next, prev *EvRateEntry
@@ -200,9 +215,10 @@ func (er *EvRateEntry) Unref() bool {
 // called due to a new event (e.g. called on timer or during GC).
 // The rate exceeded state is recorded in a EcExcInfo structure that will
 //  be returned.
-// The return values are:  the index of the exceeded rate (-1 if nothing was
-//  exceeded), the current computed value for the rate that was exceeded (0
-// if not) and the exceeded state (in a EvExcInfo structure).
+// The return values are:  the index of the exceeded rate (or the first non-0
+//  rate if nothing was exceeded), the current computed value for the rate
+// that was exceeded (or the first non zero rate) and the exceeded state
+// (in a EvExcInfo structure).
 func (er *EvRateEntry) UpdateRates(crtT time.Time, maxRates *EvRateMaxes,
 	evCntUpd uint) (int, float64, EvExcInfo) {
 
@@ -220,33 +236,49 @@ func (er *EvRateEntry) UpdateRates(crtT time.Time, maxRates *EvRateMaxes,
 					exRate = rate
 				}
 				exceeded = true
+			} else if rate > 0 && rateIdx == -1 {
+				exRate = rate
+				rateIdx = i
 			}
 		}
 	}
 	stateChg = (exceeded != er.exState.Exceeded)
+	if rateIdx == -1 {
+		rateIdx = 0 // fix rateIdx to something always valid
+	}
+
 	if stateChg {
 		if er.exState.Exceeded {
 			// changed from Exceeded to OK
 			er.exState.Exceeded = false
+			er.exState.ExRateId = uint8(rateIdx)
 			er.exState.OkConseq = uint64(evCntUpd)
 			er.exState.ExChgT = crtT
-			er.exState.ExLastT = crtT
+			er.exState.OkLastT = crtT
 		} else {
 			// changed from Ok to Exceeded
 			er.exState.Exceeded = true
 			er.exState.ExRateId = uint8(rateIdx)
 			er.exState.ExConseq = uint64(evCntUpd)
 			er.exState.ExChgT = crtT
+			er.exState.ExLastT = crtT
 		}
 	} else {
 		// no state change
 		if er.exState.Exceeded {
+			er.exState.ExRateId = uint8(rateIdx)
 			er.exState.ExConseq += uint64(evCntUpd)
 			er.exState.ExLastT = crtT
 		} else {
+			er.exState.ExRateId = uint8(rateIdx)
 			er.exState.OkConseq += uint64(evCntUpd)
 			er.exState.OkLastT = crtT
 		}
+	}
+	if er.exState.ExChgT.IsZero() {
+		// if not init, record transition time (from not existing to OK)
+		er.exState.ExChgT = crtT
+		er.exState.OkLastT = crtT
 	}
 	return rateIdx, exRate, er.exState
 }
