@@ -312,16 +312,24 @@ func (h *EvRateHash) hardGC(target uint, now time.Time) (bool, uint, bool) {
 	ok := false
 	to := false
 	var n uint
+
+	// TODO:
+	//   1st - ok entries that have not been used in ...
+	//   2nd - ok entries older  (ExChgT) then ...
+	//   3rd - exceeded entried not used in ...
+	//   4th - any entry older (T0) then ...
+	var m MatchEvRTS
+
 	for k, d := range h.ForceGCtimeL {
-		eLim := now.Add(-d)
+		m.Exceeded = 0 // match non exceeded values only
+		m.T0 = now.Add(-d)
 		runLim := time.Time{}
 		if k < len(h.ForceGCrunL) {
 			runLim = now.Add(h.ForceGCrunL[k])
 		} else if len(h.ForceGCrunL) > 0 {
 			runLim = now.Add(h.ForceGCrunL[len(h.ForceGCrunL)-1])
 		}
-		ok, n, to = h.ForceEvict(uint64(target), false,
-			now, eLim, runLim)
+		ok, n, to = h.ForceEvict(uint64(target), m, now, runLim)
 		if ok {
 			break
 		}
@@ -332,9 +340,11 @@ func (h *EvRateHash) hardGC(target uint, now time.Time) (bool, uint, bool) {
 // lightGC tries to free memory up to target, in a lightweight way.
 // returns true if succeeds, number of walked entries and a timeout flag.
 func (h *EvRateHash) lightGC(target uint, now time.Time) (bool, uint, bool) {
-	eLim := now.Add(-h.LightGCtimeL)
+	var m MatchEvRTS
+	m.Exceeded = 0 // match non exceeded entries
+	m.T0 = now.Add(-h.LightGCtimeL)
 	runLim := now.Add(h.LightGCrunL)
-	return h.ForceEvict(uint64(target), false, now, eLim, runLim)
+	return h.ForceEvict(uint64(target), m, now, runLim)
 }
 
 // IncUpdate will search and update the entry in the hash corresponding
@@ -496,15 +506,29 @@ func (h *EvRateHash) getNextExceededLock(bIdx, bPos uint, val bool) (*EvRateEntr
 }
 
 // evictLst  removes and unrefs elements from the given list that match
-// the passed exceeded val and are older then mark.
+// the MatchEvRTS, but are older.
 // It stops if the target hash entries was met, it exceeded the run time
 // limit rLim, it walked more then maxE elements or if it walked the whole
 // list.
+// Parameters:
+//    m        - MatchEvRTS structure containing the exceeded state to match
+//               against and various timestamps.
+//    first    - list element from which to start the search
+//    lst      - list (first must be a part of it)
+//    maxE     - maximum entries that should be checked
+//    target   - stop if total entries < target
+//    rLim     - time limit, stop if exceeded
+//    chkTo    - check the time limit (rLim) every chkTo entries
+//    chkoffs  - initial offset for checking the time limit
+//
+// Any of the time limits can be 0 (time.Time{}), in which case it will
+// be ignored (matches always).
+//
 // The check for run time exceed will be performed every chkto entries
 // starting at chkoffs ((n + chkoffs) % chkto == 0).
 // (if rLim or chkto == 0, no timeout check is performed)
 // returns target_met, walked_entries_no, timeout
-func (h *EvRateHash) evictLst(val bool, mark time.Time,
+func (h *EvRateHash) evictLst(m MatchEvRTS,
 	first *EvRateEntry, lst *EvRateEntryLst, maxE uint,
 	target uint64, rLim time.Time, chkto, chkoffs uint,
 	crtT time.Time) (bool, uint, bool) {
@@ -515,9 +539,7 @@ func (h *EvRateHash) evictLst(val bool, mark time.Time,
 
 		// update the state, before checking if exceeded
 		e.UpdateRates(crtT, &h.maxEvRates, 0)
-		if e.exState.Exceeded == val &&
-			(mark.IsZero() || mark.After(e.T0)) {
-
+		if m.MatchOlder(e) { // entries matching m, but with older time stamps
 			lst.RmUnsafe(e)
 			e.Unref()
 			if h.entries.Dec(1) <= target {
@@ -537,14 +559,22 @@ func (h *EvRateHash) evictLst(val bool, mark time.Time,
 
 // ForceEvict will try very hard to free entries until target is reached or
 // rLim (time limit) is exceeded.
-// All entries the matching entries (exState.Exceeded == val && creation time
-// is < eLim) wil be freed  A 0 eLim will disable the creation time check.
+// All the matching entries (matching m, with older time stamps) wil be freed.
+// Any  0 timestamp in m will disable the respective check.
 // A 0 rLim will disable the runtime limit.
+// The parameters are:
+//  target  - the number of entries that should be in the hash table
+//            (if target is met, ForceEvict() will stop)
+//   m      - MatchEvRTS structure containing the exceeded state to match
+//            against and various timestamps.
+//   crtT   - current time
+//   rLim   - stop if running for more then this interval.
+//
 // It returns true on success, false if it could not meet target or timeout,
 // the number of "walked" entries and whether or not it ended due to
 // timeout (rLim exceeded).
-func (h *EvRateHash) ForceEvict(target uint64, val bool,
-	crtT, eLim, rLim time.Time) (bool, uint, bool) {
+func (h *EvRateHash) ForceEvict(target uint64, m MatchEvRTS,
+	crtT, rLim time.Time) (bool, uint, bool) {
 	const ChkT = 10000 // how often to check time
 	var ok, to bool
 	var n uint
@@ -569,7 +599,7 @@ func (h *EvRateHash) ForceEvict(target uint64, val bool,
 	// search in HTable[b] from p till the end
 	lst = &h.HTable[b]
 	// lst is already locked here by h.getNextExceededLock(...)
-	ok, n, to = h.evictLst(val, eLim, e, lst, ^uint(0), /* all  elems*/
+	ok, n, to = h.evictLst(m, e, lst, ^uint(0), /* all  elems*/
 		target, rLim, ChkT, total, crtT)
 	p += uint(n)
 	lst.Unlock()
@@ -597,7 +627,7 @@ func (h *EvRateHash) ForceEvict(target uint64, val bool,
 		lst = &h.HTable[int(i)%len(h.HTable)]
 		if lst.entries.Get() > 0 { // race, but we don't care
 			lst.Lock()
-			ok, n, to = h.evictLst(val, eLim, lst.head.next, lst, ^uint(0),
+			ok, n, to = h.evictLst(m, lst.head.next, lst, ^uint(0),
 				target, rLim, ChkT, total, crtT)
 			lst.Unlock()
 			total += n
@@ -616,7 +646,7 @@ func (h *EvRateHash) ForceEvict(target uint64, val bool,
 		lst = &h.HTable[b]
 		if lst.entries.Get() > 0 { // race, but we don't care
 			lst.Lock()
-			ok, n, to = h.evictLst(val, eLim, lst.head.next, lst, uint(bPos0),
+			ok, n, to = h.evictLst(m, lst.head.next, lst, uint(bPos0),
 				target, rLim, ChkT, total, crtT)
 			lst.Unlock()
 			total += n

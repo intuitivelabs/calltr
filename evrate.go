@@ -396,3 +396,24 @@ func (er *EvRateEntry) matchEvRateEntry(val int, rateIdx, rateVal int,
 	}
 	return true
 }
+
+// MatchEvRTS holds the criteria for matching EvRateEntry-es based on
+// the exceeded state and the various time stamps.
+type MatchEvRTS struct {
+	Exceeded int       // 0 - match Exceeded == false, 1 for true and -1 for any
+	T0       time.Time // compare against time of entry creation
+	ExChgT   time.Time // compare against time of the last transition
+	ExLastT  time.Time // compare against time of the last exceeded rate
+	OkLastT  time.Time // compare against time of the last ok update
+}
+
+// MatchOlder returns true if m matches er and the timestamps are newer then
+// the  ones in er (er is older). Any  timestamp that is 0, will be ignored.
+func (m MatchEvRTS) MatchOlder(er *EvRateEntry) bool {
+	v := ((m.Exceeded == -1) || ((m.Exceeded == 1) == er.exState.Exceeded)) &&
+		(m.T0.IsZero() || m.T0.After(er.T0)) &&
+		(m.ExChgT.IsZero() || m.ExChgT.After(er.exState.ExChgT)) &&
+		(m.ExLastT.IsZero() || m.ExLastT.After(er.exState.ExLastT)) &&
+		(m.OkLastT.IsZero() || m.OkLastT.After(er.exState.OkLastT))
+	return v
+}
