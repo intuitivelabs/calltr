@@ -7,10 +7,12 @@
 package calltr
 
 import (
+	"errors"
 	"fmt"
 	"net"
 	"time"
 
+	"github.com/intuitivelabs/ipcrypt"
 	"github.com/intuitivelabs/sipsp"
 )
 
@@ -213,6 +215,41 @@ func (ed *EventData) Copy(src *EventData) bool {
 var fakeCancelReason = []byte("internal: cancel")
 var fakeTimeoutReason = []byte("internal: call state timeout")
 var fake2xxReason = []byte("internal: implied OK")
+
+func (d *EventData) EncryptIP(key [16]byte) error {
+	var err error
+	if d.Src.To4() != nil && d.Dst.To4() != nil {
+		err = d.EncryptIPv4(key)
+	} else if d.Src.To16() != nil && d.Dst.To16() != nil {
+		err = d.EncryptIPv6(key)
+	} else {
+		err = errors.New("EncryptIP: broken IP address")
+	}
+	return err
+}
+
+// EncryptIP encrypts source and destination IP addresses using a format preserving encryption algorithm (ipcrypt)
+func (d *EventData) EncryptIPv4(key [16]byte) error {
+	var c [4]byte
+	var err error
+	if c, err = ipcrypt.EncryptBin(key, d.Src); err != nil {
+		return err
+	}
+	for i, _ := range c {
+		d.Src[12+i] = c[i]
+	}
+	if c, err = ipcrypt.EncryptBin(key, d.Dst); err != nil {
+		return err
+	}
+	for i, _ := range c {
+		d.Dst[12+i] = c[i]
+	}
+	return nil
+}
+
+func (d *EventData) EncryptIPv6(key [16]byte) error {
+	return nil
+}
 
 // Fill EventData from a CallEntry.
 // Returns the number of PFields added. For a valid event, at least 1.
