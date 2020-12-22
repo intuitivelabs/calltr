@@ -233,19 +233,8 @@ func setIPv4Bytes(ip net.IP, b [4]byte) (err error) {
 	return
 }
 
-func (d *EventData) EncryptIP(key [16]byte) (err error) {
-	if d.Src.To4() != nil && d.Dst.To4() != nil {
-		err = d.EncryptIPv4(key)
-	} else if d.Src.To16() != nil && d.Dst.To16() != nil {
-		err = d.EncryptIPv6(key)
-	} else {
-		err = errors.New("broken IP address")
-	}
-	return
-}
-
 // EncryptIP encrypts source and destination IP addresses using a format preserving encryption algorithm (ipcrypt)
-func (d *EventData) EncryptIPv4(key [16]byte) (err error) {
+func (d *EventData) encryptIPv4(key [16]byte) (err error) {
 	var c [4]byte
 	if c, err = ipcrypt.EncryptBin(key, d.Src); err != nil {
 		return
@@ -262,8 +251,19 @@ func (d *EventData) EncryptIPv4(key [16]byte) (err error) {
 	return
 }
 
-func (d *EventData) EncryptIPv6(key [16]byte) error {
+func (d *EventData) encryptIPv6(key [16]byte) error {
 	return nil
+}
+
+func (d *EventData) EncryptIP(key [16]byte) (err error) {
+	if d.Src.To4() != nil && d.Dst.To4() != nil {
+		err = d.encryptIPv4(key)
+	} else if d.Src.To16() != nil && d.Dst.To16() != nil {
+		err = d.encryptIPv6(key)
+	} else {
+		err = errors.New("broken IP address")
+	}
+	return
 }
 
 // Fill EventData from a CallEntry.
