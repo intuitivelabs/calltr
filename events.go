@@ -216,35 +216,50 @@ var fakeCancelReason = []byte("internal: cancel")
 var fakeTimeoutReason = []byte("internal: call state timeout")
 var fake2xxReason = []byte("internal: implied OK")
 
-func (d *EventData) EncryptIP(key [16]byte) error {
-	var err error
+// setIPv4Bytes sets the bytes of an IPv4 address preserving the format
+// (i.e. either plain IPv4 or IPv4 address represented as an IPv6 address)
+// it assumes "ip" is an IPv4 address
+func setIPv4Bytes(ip net.IP, b [4]byte) (err error) {
+	switch len(ip) {
+	case net.IPv4len:
+		ip = b[:]
+	case net.IPv6len:
+		for i, _ := range b {
+			ip[12+i] = b[i]
+		}
+	default:
+		err = errors.New("broken IP address")
+	}
+	return
+}
+
+func (d *EventData) EncryptIP(key [16]byte) (err error) {
 	if d.Src.To4() != nil && d.Dst.To4() != nil {
 		err = d.EncryptIPv4(key)
 	} else if d.Src.To16() != nil && d.Dst.To16() != nil {
 		err = d.EncryptIPv6(key)
 	} else {
-		err = errors.New("EncryptIP: broken IP address")
+		err = errors.New("broken IP address")
 	}
-	return err
+	return
 }
 
 // EncryptIP encrypts source and destination IP addresses using a format preserving encryption algorithm (ipcrypt)
-func (d *EventData) EncryptIPv4(key [16]byte) error {
+func (d *EventData) EncryptIPv4(key [16]byte) (err error) {
 	var c [4]byte
-	var err error
 	if c, err = ipcrypt.EncryptBin(key, d.Src); err != nil {
-		return err
+		return
 	}
-	for i, _ := range c {
-		d.Src[12+i] = c[i]
+	if err = setIPv4Bytes(d.Src, c); err != nil {
+		return
 	}
 	if c, err = ipcrypt.EncryptBin(key, d.Dst); err != nil {
-		return err
+		return
 	}
-	for i, _ := range c {
-		d.Dst[12+i] = c[i]
+	if err = setIPv4Bytes(d.Src, c); err != nil {
+		return
 	}
-	return nil
+	return
 }
 
 func (d *EventData) EncryptIPv6(key [16]byte) error {
