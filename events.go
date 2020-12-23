@@ -222,11 +222,9 @@ var fake2xxReason = []byte("internal: implied OK")
 func setIPv4Bytes(ip net.IP, b [4]byte) (err error) {
 	switch len(ip) {
 	case net.IPv4len:
-		ip = b[:]
+		copy(ip, b[:])
 	case net.IPv6len:
-		for i, _ := range b {
-			ip[12+i] = b[i]
-		}
+		copy(ip[12:], b[:])
 	default:
 		err = errors.New("broken IP address")
 	}
