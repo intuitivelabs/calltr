@@ -963,6 +963,7 @@ func (n *NetInfo) IP() net.IP {
 func (n *NetInfo) SetIP(ip *net.IP) {
 	if len(*ip) == 16 {
 		n.SetIPv6([]byte(*ip))
+		return
 	}
 	n.SetIPv4([]byte(*ip))
 }
