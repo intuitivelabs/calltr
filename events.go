@@ -7,10 +7,12 @@
 package calltr
 
 import (
+	"errors"
 	"fmt"
 	"net"
 	"time"
 
+	"github.com/intuitivelabs/ipcrypt"
 	"github.com/intuitivelabs/sipsp"
 )
 
@@ -213,6 +215,54 @@ func (ed *EventData) Copy(src *EventData) bool {
 var fakeCancelReason = []byte("internal: cancel")
 var fakeTimeoutReason = []byte("internal: call state timeout")
 var fake2xxReason = []byte("internal: implied OK")
+
+// setIPv4Bytes sets the bytes of an IPv4 address preserving the format
+// (i.e. either plain IPv4 or IPv4 address represented as an IPv6 address)
+// it assumes "ip" is an IPv4 address
+func setIPv4Bytes(ip net.IP, b [4]byte) (err error) {
+	switch len(ip) {
+	case net.IPv4len:
+		copy(ip, b[:])
+	case net.IPv6len:
+		copy(ip[12:], b[:])
+	default:
+		err = errors.New("broken IP address")
+	}
+	return
+}
+
+// EncryptIP encrypts source and destination IP addresses using a format preserving encryption algorithm (ipcrypt)
+func (d *EventData) encryptIPv4(key [16]byte) (err error) {
+	var c [4]byte
+	if c, err = ipcrypt.EncryptBin(key, d.Src); err != nil {
+		return
+	}
+	if err = setIPv4Bytes(d.Src, c); err != nil {
+		return
+	}
+	if c, err = ipcrypt.EncryptBin(key, d.Dst); err != nil {
+		return
+	}
+	if err = setIPv4Bytes(d.Src, c); err != nil {
+		return
+	}
+	return
+}
+
+func (d *EventData) encryptIPv6(key [16]byte) error {
+	return nil
+}
+
+func (d *EventData) EncryptIP(key [16]byte) (err error) {
+	if d.Src.To4() != nil && d.Dst.To4() != nil {
+		err = d.encryptIPv4(key)
+	} else if d.Src.To16() != nil && d.Dst.To16() != nil {
+		err = d.encryptIPv6(key)
+	} else {
+		err = errors.New("broken IP address")
+	}
+	return
+}
 
 // Fill EventData from a CallEntry.
 // Returns the number of PFields added. For a valid event, at least 1.
