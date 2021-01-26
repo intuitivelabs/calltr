@@ -12,6 +12,7 @@ import (
 	"regexp"
 	"sync/atomic"
 	"time"
+	"unsafe"
 )
 
 const NEvRates = 3 // number of event rate intervals
@@ -37,32 +38,96 @@ func InitEvRateMaxes(em *EvRateMaxes,
 	}
 }
 
-// Get returns the rate at the specified index.
+// Get returns the rate at the specified index (non-atomic version).
 // It returns true and the rate on success and false and EvRateMax{} on
 // error (index out of range).
-func (em EvRateMaxes) Get(idx int) (bool, EvRateMax) {
+func (em *EvRateMaxes) Get(idx int) (bool, EvRateMax) {
 	if idx >= 0 && idx < len(em) {
 		return true, em[idx]
 	}
 	return false, EvRateMax{}
 }
 
+// AtomicGet returns the rate at the specified index.
+// It returns true and the rate on success and false and EvRateMax{} on
+// error (index out of range).
+func (em *EvRateMaxes) AtomicGet(idx int) (bool, EvRateMax) {
+	var rm EvRateMax
+	if idx >= 0 && idx < len(em) {
+		for {
+			rm.Max = em.AtomicGetMRate(idx)
+			rm.Intvl = em.AtomicGetIntvl(idx)
+			// if some value change, re-read
+			if rm.Max == em.AtomicGetMRate(idx) &&
+				rm.Intvl == em.AtomicGetIntvl(idx) {
+				break
+			}
+		}
+		return true, rm
+	}
+	return false, rm
+}
+
 // GetMRate returns the rate limit part for the maximum rate at index idx.
 // On error (idx out of range), it returns -1.
-func (em EvRateMaxes) GetMRate(idx int) float64 {
+func (em *EvRateMaxes) GetMRate(idx int) float64 {
 	if idx >= 0 && idx < len(em) {
 		return em[idx].Max
 	}
 	return -1
 }
 
-// GetIntvl returns the interval for the max rate at idx.
+// AtomicGetMRate returns the rate limit part for the maximum rate at idx.
+// On error (idx out of range), it returns -1.
+func (em *EvRateMaxes) AtomicGetMRate(idx int) float64 {
+	if idx >= 0 && idx < len(em) {
+		// ugly hack to get over lacking atomic load for float64
+		u64 := atomic.LoadUint64(
+			(*uint64)(unsafe.Pointer(&em[idx].Max)))
+		return *((*float64)(unsafe.Pointer(&u64)))
+	}
+	return -1
+}
+
+// AtomicSetMRate sets the rate limit part for the maximum rate at idx.
+// On error (idx out of range), it returns false.
+func (em *EvRateMaxes) AtomicSetMRate(idx int, maxv float64) bool {
+	if idx >= 0 && idx < len(em) {
+		// ugly hack to get over lacking atomic store for float64
+		u64 := *((*uint64)((unsafe.Pointer)(&maxv)))
+		atomic.StoreUint64((*uint64)(unsafe.Pointer(&em[idx].Max)), u64)
+		return true
+	}
+	return false
+}
+
+// GetIntvl returns the interval for the max rate at idx (non-atomic version).
 // On error (idx out of range), it returns 0.
-func (em EvRateMaxes) GetIntvl(idx int) time.Duration {
+func (em *EvRateMaxes) GetIntvl(idx int) time.Duration {
 	if idx >= 0 && idx < len(em) {
 		return em[idx].Intvl
 	}
 	return 0
+}
+
+// AtomicGetIntvl returns the interval for the max rate at idx.
+// On error (idx out of range), it returns 0.
+func (em *EvRateMaxes) AtomicGetIntvl(idx int) time.Duration {
+	if idx >= 0 && idx < len(em) {
+		return time.Duration(
+			atomic.LoadInt64((*int64)(&em[idx].Intvl)))
+	}
+	return 0
+}
+
+// AtomicSetIntvl sets the interval for the max rate at idx.
+// On error (idx out of range), it returns false.
+func (em *EvRateMaxes) AtomicSetIntvl(idx int, intvl time.Duration) bool {
+	if idx >= 0 && idx < len(em) {
+		atomic.StoreInt64((*int64)(&em[idx].Intvl), int64(intvl))
+		return true
+	}
+	return false
 }
 
 // EvRate holds an event rate for a specific interval.
@@ -210,7 +275,7 @@ func (er *EvRateEntry) Ref() int32 {
 }
 
 // Unref decrements the reference counter and if 0 frees EvRatelEntry.
-// Returns true if the CallEntry was freed and false if it's still referenced.
+// Returns true if the entry was freed and false if it's still referenced.
 func (er *EvRateEntry) Unref() bool {
 	if atomic.AddInt32(&er.refCnt, -1) == 0 {
 		// sanity checks
@@ -242,9 +307,13 @@ func (er *EvRateEntry) UpdateRates(crtT time.Time, maxRates *EvRateMaxes,
 	rateIdx := -1
 	exRate := float64(0)
 	for i := 0; i < len(maxRates) && i < len(er.Rates); i++ {
-		if maxRates[i].Intvl != 0 {
-			_, rate := er.Rates[i].Update(er.N, crtT, er.T0, maxRates[i].Intvl)
-			if rate > maxRates[i].Max && maxRates[i].Max != 0 {
+		// could try AtomicGet(i) and get the whole EvRateMax struct,
+		// a bit more safe but also more expensive (4 atomic ops instead of 2)
+		intvl := maxRates.AtomicGetIntvl(i)
+		if intvl != 0 {
+			_, rate := er.Rates[i].Update(er.N, crtT, er.T0, intvl)
+			max := maxRates.AtomicGetMRate(i)
+			if rate > max && max > 0 {
 				if !exceeded {
 					// record first exceeded index and rate
 					rateIdx = i
@@ -317,7 +386,7 @@ func (er *EvRateEntry) IncUpdateR(crtT time.Time, maxRates *EvRateMaxes) (int, f
 //                     maxRates an array with  max rate/interval pairs of which
 //                              only the interval part is used to compute the
 //                              current rate. Can be nil (in this case the
-//                              current interval saved inside er will be used.
+//                              current interval saved inside er will be used).
 // It returns true and value on success, false on error.
 func (er *EvRateEntry) GetRate(rIdx int, crtT time.Time, maxRates *EvRateMaxes) (bool, float64) {
 	if rIdx < len(er.Rates) {
@@ -327,7 +396,11 @@ func (er *EvRateEntry) GetRate(rIdx int, crtT time.Time, maxRates *EvRateMaxes) 
 		}
 		delta := er.Rates[rIdx].Delta
 		if maxRates != nil && rIdx < len(maxRates) {
-			delta = maxRates[rIdx].Intvl
+			delta = maxRates.AtomicGetIntvl(rIdx)
+		}
+		// if rate calc. disabled => return 0
+		if delta == 0 {
+			return true, 0
 		}
 		// compute actual rate if more then delta since last update:
 		_, rate := er.Rates[rIdx].ComputeRate(er.N, crtT, delta)
@@ -397,23 +470,106 @@ func (er *EvRateEntry) matchEvRateEntry(val int, rateIdx, rateVal int,
 	return true
 }
 
+type MatchOp uint8
+
+const (
+	MOpNone         = 0         // ignore, always true
+	MOpEQ   MatchOp = 1 << iota // match Exceeded state
+	MOpGT
+	MOpLT
+	MOpGE = MOpGT | MOpEQ
+	MOpLE = MOpLT | MOpEQ
+	MOpNE = MOpLT | MOpGT
+)
+
+func opCmpTime(T1 time.Time, op MatchOp, T2 time.Time) bool {
+	return (op == MOpNone) ||
+		((op&MOpLT) != 0 && T1.Before(T2)) ||
+		((op&MOpEQ) != 0 && T1.Equal(T2)) ||
+		((op&MOpGT) != 0 && T1.After(T2))
+}
+
+func opCmpUint64(v1 uint64, op MatchOp, v2 uint64) bool {
+	return (op == MOpNone) ||
+		((op&MOpLT) != 0 && v1 < v2) ||
+		((op&MOpEQ) != 0 && v1 == v2) ||
+		((op&MOpGT) != 0 && v1 > v2)
+}
+
+func opCmpBool(v1 bool, op MatchOp, v2 bool) bool {
+	return (op == MOpNone) ||
+		((op&MOpEQ) != 0 && v1 == v2) ||
+		((op&MOpNE) != 0 && v1 != v2)
+}
+
+func opCmpFloat64(v1 float64, op MatchOp, v2 float64) bool {
+	return (op == MOpNone) ||
+		((op&MOpLT) != 0 && v1 < v2) ||
+		((op&MOpEQ) != 0 && v1 == v2) ||
+		((op&MOpGT) != 0 && v1 > v2)
+}
+
 // MatchEvRTS holds the criteria for matching EvRateEntry-es based on
 // the exceeded state and the various time stamps.
 type MatchEvRTS struct {
-	Exceeded int       // 0 - match Exceeded == false, 1 for true and -1 for any
-	T0       time.Time // compare against time of entry creation
+	OpEx MatchOp
+	Ex   bool // match against EvRate.exState.Exceeded (true for blacklisted)
+
+	OpT0 MatchOp   // T0 OpT0 EvRate.T0
+	T0   time.Time // compare against time of entry creation
+
+	OpExChgT MatchOp   // ExChgT OpOpExChgT EvRate.exState.ExChgT
 	ExChgT   time.Time // compare against time of the last transition
-	ExLastT  time.Time // compare against time of the last exceeded rate
-	OkLastT  time.Time // compare against time of the last ok update
+
+	OpExLastT MatchOp   // ExLastT OpExLastT EvRate.exState.ExLastT
+	ExLastT   time.Time // compare against time of the last exceeded rate
+
+	OpOkLastT MatchOp   // OkLastT OpOkLastT EvRate.exState.OkLastT
+	OkLastT   time.Time // compare against time of the last ok update
 }
 
-// MatchOlder returns true if m matches er and the timestamps are newer then
-// the  ones in er (er is older). Any  timestamp that is 0, will be ignored.
-func (m MatchEvRTS) MatchOlder(er *EvRateEntry) bool {
-	v := ((m.Exceeded == -1) || ((m.Exceeded == 1) == er.exState.Exceeded)) &&
-		(m.T0.IsZero() || m.T0.After(er.T0)) &&
-		(m.ExChgT.IsZero() || m.ExChgT.After(er.exState.ExChgT)) &&
-		(m.ExLastT.IsZero() || m.ExLastT.After(er.exState.ExLastT)) &&
-		(m.OkLastT.IsZero() || m.OkLastT.After(er.exState.OkLastT))
-	return v
+// MatchST returns true if m matches er according to the match operators for
+// each of m's state or timestamp fields.
+func (m MatchEvRTS) MatchST(er *EvRateEntry) bool {
+	return opCmpBool(m.Ex, m.OpEx, er.exState.Exceeded) &&
+		opCmpTime(m.T0, m.OpT0, er.T0) &&
+		opCmpTime(m.ExChgT, m.OpExChgT, er.exState.ExChgT) &&
+		opCmpTime(m.ExLastT, m.OpExLastT, er.exState.ExLastT) &&
+		opCmpTime(m.OkLastT, m.OpOkLastT, er.exState.OkLastT)
+}
+
+// MatchEvRD holds the criteria for matching EvRateEntry-es based on
+// the exceeded state and time offsets from a reference time.
+type MatchEvROffs struct {
+	OpEx MatchOp
+	Ex   bool // match against EvRate.exState.Exceeded (true for blacklisted)
+
+	OpT0 MatchOp       // T0 OpT0 EvRate.T0
+	DT0  time.Duration // compare against time of entry creation
+
+	OpExChgT MatchOp       // ExChgT OpOpExChgT EvRate.exState.ExChgT
+	DExChgT  time.Duration // compare against time of the last transition
+
+	OpExLastT MatchOp       // ExLastT OpExLastT EvRate.exState.ExLastT
+	DExLastT  time.Duration // compare against time of the last exceeded rate
+
+	OpOkLastT MatchOp       // OkLastT OpOkLastT EvRate.exState.OkLastT
+	DOkLastT  time.Duration // compare against time of the last ok update
+}
+
+// ToMatchEvRTS converts to a MatchEvRTS structure based on refT.
+func (m MatchEvROffs) MatchBefore(refT time.Time) MatchEvRTS {
+
+	return MatchEvRTS{
+		OpEx:      m.OpEx,
+		Ex:        m.Ex,
+		OpT0:      m.OpT0,
+		T0:        refT.Add(-m.DT0),
+		OpExChgT:  m.OpExChgT,
+		ExChgT:    refT.Add(-m.DExChgT),
+		OpExLastT: m.OpExLastT,
+		ExLastT:   refT.Add(-m.DExLastT),
+		OpOkLastT: m.OpOkLastT,
+		OkLastT:   refT.Add(-m.DOkLastT),
+	}
 }
