@@ -152,6 +152,71 @@ func (lst *EvRateEntryLst) ForEachSafeRm(f func(e *EvRateEntry, l *EvRateEntryLs
 	}
 }
 
+// EvRateGCcfg holds the configuration for the entries/memory limits for
+// EvRateHash and the garabge collection criterias/targets.
+type EvRateGCcfg struct {
+	// match criteria for entries to be GCed
+	ForceGCMatchC *[]MatchEvROffs
+	// GC run time limits
+	ForceGCrunL *[]time.Duration
+	// light GC lifetime match limit, atomic changes
+	LightGCtimeL time.Duration
+	// light GC run limit, atomic
+	LightGCrunL time.Duration
+	MaxEntries  uint32 // maximum entries allowed (hard GC)
+	TargetMax   uint32 // if max entries, free up to targetMax (hard GC)
+	GCtrigger   uint32 // GC "light" free trigger
+	GCtarget    uint32 // GC "light" free target
+}
+
+// SetForceGCMatchC changes the matching conditions for entries that
+// should be removed during forced GC.
+func SetForceGCMatchC(c *EvRateGCcfg, conds *[]MatchEvROffs) {
+	p := (*unsafe.Pointer)(unsafe.Pointer(&c.ForceGCMatchC))
+	atomic.StorePointer(p, unsafe.Pointer(conds))
+}
+
+// SetForceGCrunL changes the maximum run times for each of the
+// forced GC runs (each run uses a different match condition, set by
+// SetForceGCMatchC above)
+func SetForceGCrunL(c *EvRateGCcfg, runt *[]time.Duration) {
+	p := (*unsafe.Pointer)(unsafe.Pointer(&c.ForceGCrunL))
+	atomic.StorePointer(p, unsafe.Pointer(runt))
+}
+
+// SetLighGCparams set the internal parameters for the light GC:
+//  the entry life "expire" ime and the running limit for the GC.
+func SetLightGCparams(c *EvRateGCcfg, lifetime, runLim time.Duration) {
+	atomic.StoreInt64((*int64)(&c.LightGCtimeL), int64(lifetime))
+	atomic.StoreInt64((*int64)(&c.LightGCrunL), int64(runLim))
+}
+
+// SetGCtriggers sets the garbage collections trigger and target values.
+func SetGCtriggers(
+	c *EvRateGCcfg,
+	hGCmaxEntries uint32, // hard GC trigger
+	hGCtargetMax uint32, // hard GC target
+	lGCtrigger uint32, // light GC trigget
+	lGCtarget uint32, // light GC target
+) {
+	atomic.StoreUint32(&c.MaxEntries, hGCmaxEntries)
+	atomic.StoreUint32(&c.TargetMax, hGCtargetMax)
+	atomic.StoreUint32(&c.GCtrigger, lGCtrigger)
+	atomic.StoreUint32(&c.GCtarget, lGCtarget)
+}
+
+// GetGCtriggers returns the garbage collections trigger and target values:
+// hard GC trigger (max entries), hard GC target entries, light GC trigger,
+// light GC target.
+// Note: hard & light GC are triggered when new entries are allocated.
+func (c EvRateGCcfg) GetGCtriggers() (uint32, uint32, uint32, uint32) {
+
+	return atomic.LoadUint32(&c.MaxEntries),
+		atomic.LoadUint32(&c.TargetMax),
+		atomic.LoadUint32(&c.GCtrigger),
+		atomic.LoadUint32(&c.GCtarget)
+}
+
 // EvRateHash holds the EvRate hash table.
 type EvRateHash struct {
 	HTable  []EvRateEntryLst
@@ -166,19 +231,23 @@ type EvRateHash struct {
 
 	// TODO: improvement: change to atomic pointer ?
 	maxEvRates EvRateMaxes // (max rate, interval) pairs table
-	// atomic pointer
-	forceGCMatchC *[]MatchEvROffs
-	// atomic pointer
-	forceGCrunL *[]time.Duration
-	// atomic changes (can be changed at runtime)
-	lightGCtimeL time.Duration
-	lightGCrunL  time.Duration
 
-	// atomic changes
-	maxEntries uint32 // maximum entries allowed
-	targetMax  uint32 // if max entries, free up to targetMax
-	gcTrigger  uint32 // GC "heavy" free trigger
-	gcTarget   uint32 // GC "heavy" free target
+	// GC & max mem. config (atomic pointer read/change)
+	gcCfg *EvRateGCcfg
+	/* TODO
+	// match criteria for entries to be GCed, atomic pointer
+	forceGCMatchC *[]MatchEvROffs
+	// GC run time limits, atomic pointer
+	forceGCrunL *[]time.Duration
+	// light GC lifetime match limit, atomic changes
+	lightGCtimeL time.Duration
+	// light GC run limit, atomic
+	lightGCrunL time.Duration
+	maxEntries  uint32 // maximum entries allowed
+	targetMax   uint32 // if max entries, free up to targetMax
+	gcTrigger   uint32 // GC "light" free trigger
+	gcTarget    uint32 // GC "light" free target
+	*/
 }
 
 // Hash computes and returns the index in the hash table.
@@ -192,7 +261,7 @@ func (h *EvRateHash) Hash(src *NetInfo, Ev EventType) uint32 {
 // Init initializes the hash table.
 // The parameters are the hash table bucket number, the target
 // maximum entries (if exceeded hard GC would be force-run immediately in
-// an attempt to reduce the hash entries to h.targetMax; if not enough
+// an attempt to reduce the hash entries to h.gcCfg.TargetMax; if not enough
 // space was created => discard new entries) and a table with the
 //  NEvRates max_rate,interval pairs (each rate is computed on the specified
 //  interval and compared against the corresponding max_rate).
@@ -202,27 +271,21 @@ func (h *EvRateHash) Init(sz, maxEntries uint32, maxRates *EvRateMaxes) {
 		h.HTable[i].Init()
 		h.HTable[i].bucket = uint32(i)
 	}
-	h.SetGCtriggers(
+	var gcCfg EvRateGCcfg
+	SetGCtriggers(&gcCfg,
 		maxEntries,               // hard GC trigger entries no.
 		maxEntries-maxEntries/10, // hard GC target: free till 90% max
 		maxEntries-maxEntries/10-maxEntries/20, // light GC trigger 85% max
 		maxEntries-2*maxEntries/10,             // light GC target: 80% max
 	)
-	/*
-		h.maxEntries = maxEntries
-		h.targetMax = h.maxEntries - h.maxEntries/10                   // 90% max
-		h.gcTrigger = h.maxEntries - h.maxEntries/10 - h.maxEntries/20 // 85% max
-		h.gcTarget = h.maxEntries - 2*h.maxEntries/10                  // 80% max
-	*/
-
 	// lifetime time limit for GC (freeing) on forced GC (running OOM)
-	h.SetForceGCMatchC(&DefaultForceGCMatchConds)
-	//h.forceGCMatchC = &DefaultForceGCMatchConds
+	SetForceGCMatchC(&gcCfg, &DefaultForceGCMatchConds)
 	// run time limit for each force GC run (corresp. to each lifetime limit)
-	h.SetForceGCrunL(&DefaultForceGCRunL)
-	//h.forceGCrunL = &DefaultForceGCRunL
+	SetForceGCrunL(&gcCfg, &DefaultForceGCRunL)
 	// light GC  lifetime limit and runtime
-	h.SetLightGCparams(15*time.Minute, 2*time.Millisecond)
+	SetLightGCparams(&gcCfg, 15*time.Minute, 2*time.Millisecond)
+	h.SetGCcfg(&gcCfg)
+
 	if maxRates == nil {
 		for i, v := range EvRateDefaultIntvls {
 			h.SetRateMax(i, 0)
@@ -246,6 +309,7 @@ func (h *EvRateHash) Destroy() {
 		h.HTable[i].Unlock()
 	}
 	h.HTable = nil
+	h.SetGCcfg(nil)
 }
 
 // CrtEntries returns the current number of entries in the hash.
@@ -253,9 +317,27 @@ func (h *EvRateHash) CrtEntries() uint64 {
 	return h.entries.Get()
 }
 
+// GetGCcfg returns a pointer to the current GC config.
+// The returned config should be treated as "read-only" (changing something
+// in it is not supported).
+// To change a config parameter, make a config copy, change the parameter in
+// the copy and use SetGCcfg(&copy) to change the running config.
+func (h *EvRateHash) GetGCcfg() *EvRateGCcfg {
+	p := atomic.LoadPointer(
+		(*unsafe.Pointer)(unsafe.Pointer(&h.gcCfg)))
+	return (*EvRateGCcfg)(p)
+}
+
+// SetGCcfg sets a new config for the GC/entries limit.
+// It's atomic so safe to do at run time.
+func (h *EvRateHash) SetGCcfg(gcfg *EvRateGCcfg) {
+	p := (*unsafe.Pointer)(unsafe.Pointer(&h.gcCfg))
+	atomic.StorePointer(p, unsafe.Pointer(gcfg))
+}
+
 // MaxEntries returns the maximum number of entries in the hash.
 func (h *EvRateHash) MaxEntries() uint64 {
-	return uint64(atomic.LoadUint32(&h.maxEntries))
+	return uint64(h.GetGCcfg().MaxEntries)
 }
 
 // GetMaxRates returns a pointer to the internal max rates array.
@@ -322,53 +404,6 @@ func (h *EvRateHash) SetRateMax(idx int, maxv float64) bool {
 	return h.maxEvRates.AtomicSetMRate(idx, maxv)
 }
 
-// SetForceGCMatchC changes the matching conditions for entries that
-// should be removed during forced GC.
-func (h *EvRateHash) SetForceGCMatchC(conds *[]MatchEvROffs) {
-	p := (*unsafe.Pointer)(unsafe.Pointer(&h.forceGCMatchC))
-	atomic.StorePointer(p, unsafe.Pointer(conds))
-}
-
-// SetForceGCrunL changes the maximum run times for each of the
-// forced GC runs (each run uses a different match condition, set by
-// SetForceGCMatchC above)
-func (h *EvRateHash) SetForceGCrunL(runt *[]time.Duration) {
-	p := (*unsafe.Pointer)(unsafe.Pointer(&h.forceGCrunL))
-	atomic.StorePointer(p, unsafe.Pointer(runt))
-}
-
-// SetLighGCparams set the internal parameters for the light GC:
-//  the entry lifet "expire" ime and the running limit for the GC.
-func (h *EvRateHash) SetLightGCparams(lifetime, runLim time.Duration) {
-	atomic.StoreInt64((*int64)(&h.lightGCtimeL), int64(lifetime))
-	atomic.StoreInt64((*int64)(&h.lightGCrunL), int64(runLim))
-}
-
-// SetGCtriggers sets the garbage collections trigger and target values.
-func (h *EvRateHash) SetGCtriggers(
-	hGCmaxEntries uint32, // hard GC trigger
-	hGCtargetMax uint32, // hard GC target
-	lGCtrigger uint32, // light GC trigget
-	lGCtarget uint32, // light GC target
-) {
-	atomic.StoreUint32(&h.maxEntries, hGCmaxEntries)
-	atomic.StoreUint32(&h.targetMax, hGCtargetMax)
-	atomic.StoreUint32(&h.gcTrigger, lGCtrigger)
-	atomic.StoreUint32(&h.gcTarget, lGCtarget)
-}
-
-// GetGCtriggers returns the garbage collections trigger and target values:
-// hard GC trigger (max entries), hard GC target entries, light GC trigger,
-// light GC target.
-// Note: hard & light GC are triggered when new entries are allocated.
-func (h *EvRateHash) GetGCtriggers() (uint32, uint32, uint32, uint32) {
-
-	return atomic.LoadUint32(&h.maxEntries),
-		atomic.LoadUint32(&h.targetMax),
-		atomic.LoadUint32(&h.gcTrigger),
-		atomic.LoadUint32(&h.gcTarget)
-}
-
 // Get searches for a matching entry and copies it in dst (if found).
 // It returns true if an entry was found, false otherwise
 func (h *EvRateHash) GetCopy(ev EventType, src *NetInfo, dst *EvRateEntry) bool {
@@ -387,26 +422,16 @@ func (h *EvRateHash) GetCopy(ev EventType, src *NetInfo, dst *EvRateEntry) bool 
 func (h *EvRateHash) hardGC(target uint32, now time.Time) (bool, uint, bool) {
 	// try evicting older entries than
 	//        Now - ForceGCtimeL[k] till success (target met)
-	// Each GC run has a time limit in h.forceGCrunL.
+	// Each GC run has a time limit in h.gcCfg.ForceGCrunL.
 	// If there is no correp. run limit, the last one will be used.
 	// If there are no run limits, 0 will be used (no limit).
 	ok := false
 	to := false
 	var n uint
 
-	// TODO:
-	//   1st - ok entries that have not been used in 10 min
-	//   2nd - ok entries that have not been used in 30s
-	//       - ok entries that are older (EcChgT) then 1 min
-	//       - exceeded entries not used in 1 min
-	//       - any entry older (T0) then ... ?
-
-	pMatchC := atomic.LoadPointer(
-		(*unsafe.Pointer)(unsafe.Pointer(&h.forceGCMatchC)))
-	matchConds := *(*[]MatchEvROffs)(pMatchC)
-	pRunTimes := atomic.LoadPointer(
-		(*unsafe.Pointer)(unsafe.Pointer(&h.forceGCrunL)))
-	runTimes := *(*[]time.Duration)(pRunTimes)
+	gcfg := h.GetGCcfg()
+	matchConds := *gcfg.ForceGCMatchC
+	runTimes := *gcfg.ForceGCrunL
 
 	var k int
 	strategyIdx := atomic.LoadUint32(&h.gcStrategy)
@@ -417,7 +442,7 @@ func (h *EvRateHash) hardGC(target uint32, now time.Time) (bool, uint, bool) {
 			runLim = now.Add(runTimes[k])
 		} else if len(runTimes) > 0 {
 			runLim = now.Add(runTimes[len(runTimes)-1])
-		}
+		} // else runTimes is empty => no run time limit
 		ok, n, to = h.ForceEvict(uint64(target), m, now, runLim)
 		if ok {
 			break
@@ -450,8 +475,9 @@ func (h *EvRateHash) lightGC(target uint32, now time.Time) (bool, uint, bool) {
 	m.OpEx = MOpEQ
 	m.Ex = false        // match non exceeded values only
 	m.OpOkLastT = MOpLT // match last OK value older then ...
-	lifetime := time.Duration(atomic.LoadInt64((*int64)(&h.lightGCtimeL)))
-	runl := time.Duration(atomic.LoadInt64((*int64)(&h.lightGCrunL)))
+	gcfg := h.GetGCcfg()
+	lifetime := gcfg.LightGCtimeL
+	runl := gcfg.LightGCrunL
 	m.OkLastT = now.Add(-lifetime)
 	runLim := now.Add(runl)
 	return h.ForceEvict(uint64(target), m, now, runLim)
@@ -488,18 +514,19 @@ func (h *EvRateHash) IncUpdate(ev EventType, src *NetInfo,
 	// account for the new entry about to be created (h.entries++ if
 	//  max entries not exceeded, or GC could make space)
 	gcRuns := 0 // how many gc attemps (due to changing h.entries)
+	gcfg := h.GetGCcfg()
+	maxEntries := gcfg.MaxEntries
 	for {
 		crtv := h.entries.Get()
-		maxEntries := h.MaxEntries()
 		if crtv >= uint64(maxEntries) {
 			gcRuns++
 			// hard forced gc
 			// try evicting older entries than
 			//        Now - ForceGCtimeL[k] till success (target met)
-			// Each GC run has a time limit in h.forceGCrunL.
+			// Each GC run has a time limit in h.gcCfg.ForceGCrunL.
 			// If there is no correp. run limit, the last one will be used.
 			// If there are no run limits, 0 will be used (no limit).
-			targetMax := atomic.LoadUint32(&h.targetMax)
+			targetMax := gcfg.TargetMax
 			ok, _, _ := h.hardGC(targetMax, crtT)
 			// if failed to reach targetMax and current entries still
 			// greater or equal to maxEntries => fail
@@ -507,12 +534,11 @@ func (h *EvRateHash) IncUpdate(ev EventType, src *NetInfo,
 				// still too big => all the GC attempts failed => bail out
 				return false, -1, 0.0, info
 			}
-		} else if crtv >= uint64(atomic.LoadUint32(&h.gcTrigger)) &&
-			gcRuns == 0 {
+		} else if crtv >= uint64(gcfg.GCtrigger) && gcRuns == 0 {
 			// lightweight GC: a short max 2ms run, but only if we didn't
 			// try any GC so far
 			gcRuns++
-			gcTarget := atomic.LoadUint32(&h.gcTarget)
+			gcTarget := gcfg.GCtarget
 			h.lightGC(gcTarget, crtT)
 		}
 		crtv = h.entries.Get()

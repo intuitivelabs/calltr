@@ -7,6 +7,7 @@
 package calltr
 
 import (
+	"errors"
 	"fmt"
 	"net"
 	"regexp"
@@ -477,10 +478,39 @@ const (
 	MOpEQ   MatchOp = 1 << iota // match Exceeded state
 	MOpGT
 	MOpLT
-	MOpGE = MOpGT | MOpEQ
-	MOpLE = MOpLT | MOpEQ
-	MOpNE = MOpLT | MOpGT
+	MOpGE   = MOpGT | MOpEQ
+	MOpLE   = MOpLT | MOpEQ
+	MOpNE   = MOpLT | MOpGT
+	MOpLast = MOpNE
 )
+
+var matchOpNames = [...]string{
+	MOpNone: "ignore",
+	MOpEQ:   "==",
+	MOpGT:   ">",
+	MOpLT:   "<",
+	MOpGE:   ">=",
+	MOpLE:   "<=",
+	MOpNE:   "<>",
+}
+
+var errInvMatchOp = errors.New("invalid match operator")
+
+func ParseMatchOp(s string) (MatchOp, error) {
+	for op, v := range matchOpNames {
+		if s == v {
+			return MatchOp(op), nil
+		}
+	}
+	return MOpNone, errInvMatchOp
+}
+
+func (m MatchOp) String() string {
+	if int(m) < len(matchOpNames) {
+		return matchOpNames[m]
+	}
+	return "n/a"
+}
 
 func opCmpTime(T1 time.Time, op MatchOp, T2 time.Time) bool {
 	return (op == MOpNone) ||
@@ -555,6 +585,21 @@ type MatchEvROffs struct {
 
 	OpOkLastT MatchOp       // OkLastT OpOkLastT EvRate.exState.OkLastT
 	DOkLastT  time.Duration // compare against time of the last ok update
+}
+
+func (m MatchEvROffs) String() string {
+	return fmt.Sprintf("match{ blst %s %v,"+
+		" created %s %v,"+
+		" changed %s %v,"+
+		" last_blst %s %v,"+
+		" last_ok %s %v"+
+		" }",
+		m.OpEx, m.Ex,
+		m.OpT0, m.DT0,
+		m.OpExChgT, m.DExChgT,
+		m.OpExLastT, m.DExLastT,
+		m.OpOkLastT, m.DOkLastT,
+	)
 }
 
 // ToMatchEvRTS converts to a MatchEvRTS structure based on refT.
