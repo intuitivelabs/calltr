@@ -16,6 +16,8 @@ import (
 	"sync/atomic"
 	"time"
 	"unsafe"
+
+	"github.com/intuitivelabs/counters"
 )
 
 // EvRateDefaultIntvls holds the default time intervals for which event rates
@@ -217,10 +219,30 @@ func (c EvRateGCcfg) GetGCtriggers() (uint32, uint32, uint32, uint32) {
 		atomic.LoadUint32(&c.GCtarget)
 }
 
+type evRateStats struct {
+	grp *counters.Group
+
+	hGCruns counters.Handle
+	hGCok   counters.Handle
+	hGCfail counters.Handle
+	hGCto   counters.Handle
+	hGCn    counters.Handle
+
+	lGCruns counters.Handle
+	lGCok   counters.Handle
+	lGCfail counters.Handle
+	lGCto   counters.Handle
+	lGCn    counters.Handle
+
+	maxGCretrF counters.Handle
+	allocF     counters.Handle
+}
+
 // EvRateHash holds the EvRate hash table.
 type EvRateHash struct {
 	HTable  []EvRateEntryLst
 	entries StatCounter // total used entries
+	cnts    evRateStats // statistics / counters
 
 	// GC current bucket index (use it % len(HTable))
 	gcBidx uint32
@@ -234,20 +256,6 @@ type EvRateHash struct {
 
 	// GC & max mem. config (atomic pointer read/change)
 	gcCfg *EvRateGCcfg
-	/* TODO
-	// match criteria for entries to be GCed, atomic pointer
-	forceGCMatchC *[]MatchEvROffs
-	// GC run time limits, atomic pointer
-	forceGCrunL *[]time.Duration
-	// light GC lifetime match limit, atomic changes
-	lightGCtimeL time.Duration
-	// light GC run limit, atomic
-	lightGCrunL time.Duration
-	maxEntries  uint32 // maximum entries allowed
-	targetMax   uint32 // if max entries, free up to targetMax
-	gcTrigger   uint32 // GC "light" free trigger
-	gcTarget    uint32 // GC "light" free target
-	*/
 }
 
 // Hash computes and returns the index in the hash table.
@@ -294,6 +302,49 @@ func (h *EvRateHash) Init(sz, maxEntries uint32, maxRates *EvRateMaxes) {
 	} else {
 		h.SetMaxRates(maxRates) // copy rates array
 	}
+
+	evRateCntDefs := [...]counters.Def{
+		{&h.cnts.hGCruns, 0, nil, nil, "hard_gc_runs",
+			"hard GC runs (everytime event_rate_max_sz is exceeded)"},
+		{&h.cnts.hGCok, 0, nil, nil, "hard_gc_tgt_met",
+			"how many times did the hard GC meet it's target"},
+		{&h.cnts.hGCfail, 0, nil, nil, "hard_gc_fail",
+			"how many times did the hard GC fail to free enough entries"},
+		{&h.cnts.hGCto, 0, nil, nil, "hard_gc_timeout",
+			"how many times did the hard GC time out"},
+		{&h.cnts.hGCn, counters.CntMaxF | counters.CntMinF, nil, nil,
+			"hard_gc_walked", "how many entries did the last hard GC run walk"},
+
+		{&h.cnts.lGCruns, 0, nil, nil, "light_gc_runs",
+			"light GC runs, everytime light_gc_trigger is exceeded"},
+		{&h.cnts.lGCok, 0, nil, nil, "light_gc_tgt_met",
+			"how many times did the light GC meet it's target"},
+		{&h.cnts.lGCfail, 0, nil, nil, "light_gc_fail",
+			"how many times did the light GC fail to free enough entries"},
+		{&h.cnts.lGCto, 0, nil, nil, "light_gc_timeout",
+			"how many times did the light GC timeout"},
+		{&h.cnts.lGCn, counters.CntMaxF | counters.CntMinF, nil, nil,
+			"light_gc_walked",
+			"how many entries did the last light GC run walk"},
+
+		{&h.cnts.maxGCretrF, 0, nil, nil, "max_gc_retr_fail",
+			"maximum GC retries per alloc entry, exceeded"},
+		{&h.cnts.allocF, 0, nil, nil, "alloc_fail",
+			"new entry allocation failed"},
+	}
+	entries := 100
+	if entries < len(evRateCntDefs) {
+		entries = len(evRateCntDefs)
+	}
+	h.cnts.grp = counters.NewGroup("ev_rate_gc", nil, entries)
+	if h.cnts.grp == nil {
+		// TODO: better error fallback
+		h.cnts.grp = &counters.Group{}
+		h.cnts.grp.Init("ev_rate_gc_calltr", nil, entries)
+		return
+	}
+	h.cnts.grp.RegisterDefs(evRateCntDefs[:])
+	// TODO: handle failure
 }
 
 // Destroy frees/unref everything in the hash table.
@@ -535,11 +586,20 @@ func (h *EvRateHash) IncUpdate(ev EventType, src *NetInfo,
 			// If there is no correp. run limit, the last one will be used.
 			// If there are no run limits, 0 will be used (no limit).
 			targetMax := gcfg.TargetMax
-			ok, _, _ := h.hardGC(targetMax, crtT)
-			// if failed to reach targetMax and current entries still
-			// greater or equal to maxEntries => fail
-			if !ok && h.entries.Get() >= uint64(maxEntries) {
+			h.cnts.grp.Inc(h.cnts.hGCruns)
+			ok, n, to := h.hardGC(targetMax, crtT)
+			h.cnts.grp.Set(h.cnts.hGCn, counters.Val(n))
+			if to {
+				// exited due to timeout
+				h.cnts.grp.Inc(h.cnts.hGCto)
+			}
+			if ok {
+				h.cnts.grp.Inc(h.cnts.hGCok)
+			} else if h.entries.Get() >= uint64(maxEntries) {
+				// if failed to reach targetMax and current entries still
+				// greater or equal to maxEntries => fail
 				// still too big => all the GC attempts failed => bail out
+				h.cnts.grp.Inc(h.cnts.hGCfail)
 				return false, -1, 0.0, info
 			}
 		} else if crtv >= uint64(gcfg.GCtrigger) && gcRuns == 0 {
@@ -547,7 +607,18 @@ func (h *EvRateHash) IncUpdate(ev EventType, src *NetInfo,
 			// try any GC so far
 			gcRuns++
 			gcTarget := gcfg.GCtarget
-			h.lightGC(gcTarget, crtT)
+			h.cnts.grp.Inc(h.cnts.lGCruns)
+			ok, n, to := h.lightGC(gcTarget, crtT)
+			h.cnts.grp.Set(h.cnts.lGCn, counters.Val(n))
+			if to {
+				// exited due to timeout
+				h.cnts.grp.Inc(h.cnts.lGCto)
+			}
+			if ok {
+				h.cnts.grp.Inc(h.cnts.lGCok)
+			} else if h.entries.Get() >= uint64(gcTarget) {
+				h.cnts.grp.Inc(h.cnts.lGCfail)
+			}
 		}
 		crtv = h.entries.Get()
 		if crtv < uint64(maxEntries) &&
@@ -559,6 +630,7 @@ func (h *EvRateHash) IncUpdate(ev EventType, src *NetInfo,
 		//(somebody added in the meantime more entries) => re-do till
 		// gcRuns exceeds max tries.
 		if gcRuns >= 3 {
+			h.cnts.grp.Inc(h.cnts.maxGCretrF)
 			// too many gcRuns => bail out
 			return false, -1, 0.0, info
 		}
@@ -570,6 +642,7 @@ func (h *EvRateHash) IncUpdate(ev EventType, src *NetInfo,
 	if n == nil {
 		// alloc failed
 		h.entries.Dec(1) // new entry not added => h.entries--
+		h.cnts.grp.Inc(h.cnts.allocF)
 		return false, -1, 0.0, info
 	}
 	n.Src = *src
