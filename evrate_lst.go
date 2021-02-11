@@ -298,6 +298,9 @@ func (h *EvRateHash) Init(sz, maxEntries uint32, maxRates *EvRateMaxes) {
 
 // Destroy frees/unref everything in the hash table.
 func (h *EvRateHash) Destroy() {
+	if h.HTable == nil { // not init
+		return
+	}
 	for i := 0; i < len(h.HTable); i++ {
 		h.HTable[i].Lock()
 		s := h.HTable[i].head.next
@@ -310,6 +313,11 @@ func (h *EvRateHash) Destroy() {
 	}
 	h.HTable = nil
 	h.SetGCcfg(nil)
+}
+
+// IsInit returns true if the current EvRateHash is already initialised.
+func (h *EvRateHash) IsInit() bool {
+	return h.HTable != nil
 }
 
 // CrtEntries returns the current number of entries in the hash.
@@ -675,7 +683,6 @@ func (h *EvRateHash) evictLst(m MatchEvRTS,
 
 	n := uint(0)
 	for e, nxt := first, first.next; e != &lst.head; e, nxt = nxt, nxt.next {
-		// TODO: add more conditions, e.g. create time
 
 		// update the state, before checking if exceeded
 		e.UpdateRates(crtT, &h.maxEvRates, 0)
