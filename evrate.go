@@ -217,9 +217,10 @@ type EvExcInfo struct {
 }
 
 // FillEvRateInfo fills a EvRateInfo structure from an EvExcInfo,
-//  current rate, max rate and the rate interval.
+//  current rate, max rate, the rate interval and a custom diff exceeded
+//  count diff since last report.
 func FillEvRateInfo(ri *EvRateInfo, exInfo *EvExcInfo,
-	rate, maxr float64, intvl time.Duration) {
+	rate, maxr float64, intvl time.Duration, diff uint64) {
 	if exInfo.Exceeded {
 		ri.ExCnt = exInfo.ExConseq
 	} else {
@@ -229,6 +230,7 @@ func FillEvRateInfo(ri *EvRateInfo, exInfo *EvExcInfo,
 	ri.Rate = rate
 	ri.MaxR = maxr
 	ri.Intvl = intvl
+	ri.ExCntDiff = diff
 }
 
 // String implements the string interface.
