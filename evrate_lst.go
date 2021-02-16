@@ -913,13 +913,13 @@ func (h *EvRateHash) Stats() HStats {
 
 // PrintFilter will dump EvRate entries matching the parameters.
 // Parameters:
-// 	start - skip start matching entries
-// 	max   - stop after printing max entries
-// 	rateIdx - compare against this rate (from EvRateInts[])
-// >rateVal  - print entries with rate > rateVal or rate < rateVal
+// start - skip start matching entries
+// max   - stop after printing max entries
+// rateIdx - compare against this rate (from EvRateInts[])
+// rateVal  - print entries with rate >= rateVal or rate < rateVal
 //            (depends on the sign)
-// >net   -. ip network to match against
-// 	re    - if set, a regexp to match the IP against, otherwise s will be
+// net   - ip network to match against
+// re    - if set, a regexp to match the IP against, otherwise s will be
 //          converted to an IP and matched against the IP entry.
 func (h *EvRateHash) PrintFilter(w io.Writer, start, max int,
 	val int, rateIdx, rateVal int, net *net.IPNet, re *regexp.Regexp) {
