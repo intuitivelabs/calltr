@@ -957,13 +957,13 @@ func (h *EvRateHash) PrintFilter(w io.Writer, start, max int,
 						e.Rates[idx].Delta,
 						now.Sub(e.Rates[idx].Updated).Truncate(time.Second))
 				}
+				fmt.Fprintln(w)
+				if printed > max {
+					lst.Unlock()
+					return
+				}
 			}
-			fmt.Fprintln(w)
 			n++
-			if printed > max {
-				lst.Unlock()
-				return
-			}
 		}
 		lst.Unlock()
 	}
