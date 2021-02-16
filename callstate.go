@@ -216,6 +216,7 @@ func (s CallState) TimeoutS() uint {
 
 type CallFlags uint8
 
+const CFNone CallFlags = 0
 const (
 	CFHashed          CallFlags = 1 << iota
 	CFReused                    // entry re-use instead of forking
@@ -229,6 +230,7 @@ const (
 
 // debugging, keep in sync with the CallFlags consts above
 var cfNames = [...]string{
+	"None",
 	"Entry_Hashed",
 	"Reused",
 	"REG_Reuse_Hack",
