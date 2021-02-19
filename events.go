@@ -28,22 +28,32 @@ const (
 	EvRegExpired
 	EvSubNew
 	EvSubDel
+	EvOtherFailed  // other case, not covered above, with neg. reply
+	EvOtherTimeout // same as above for timeout
+	EvOtherOk      // same as above, success (e.g OPTIONS out of call)
+	EvParseErr
+	EvNonSIPprobe // non sip probe
 	EvBad
 )
 
 var evTypeName = [EvBad + 1]string{
-	EvNone:        "empty",
-	EvCallStart:   "call-start",
-	EvCallEnd:     "call-end",
-	EvCallAttempt: "call-attempt",
-	EvAuthFailed:  "auth-failed",
-	EvActionLog:   "action-log",
-	EvRegNew:      "reg-new",
-	EvRegDel:      "reg-del",
-	EvRegExpired:  "reg-expired",
-	EvSubNew:      "sub-new",
-	EvSubDel:      "sub-del",
-	EvBad:         "invalid",
+	EvNone:         "empty",
+	EvCallStart:    "call-start",
+	EvCallEnd:      "call-end",
+	EvCallAttempt:  "call-attempt",
+	EvAuthFailed:   "auth-failed",
+	EvActionLog:    "action-log",
+	EvRegNew:       "reg-new",
+	EvRegDel:       "reg-del",
+	EvRegExpired:   "reg-expired",
+	EvSubNew:       "sub-new",
+	EvSubDel:       "sub-del",
+	EvOtherFailed:  "other-failed",
+	EvOtherTimeout: "other-timeout",
+	EvOtherOk:      "other-ok",
+	EvParseErr:     "parse-error",
+	EvNonSIPprobe:  "msg-probe",
+	EvBad:          "invalid",
 }
 
 func (e EventType) String() string {
@@ -56,17 +66,22 @@ func (e EventType) String() string {
 type EventFlags uint16
 
 const (
-	EvNoneF        EventFlags = iota
-	EvCallStartF   EventFlags = (EventFlags)(1) << EvCallStart
-	EvCallEndF     EventFlags = (EventFlags)(1) << EvCallEnd
-	EvCallAttemptF EventFlags = (EventFlags)(1) << EvCallAttempt
-	EvAuthFailedF  EventFlags = (EventFlags)(1) << EvAuthFailed
-	EvActionLogF   EventFlags = (EventFlags)(1) << EvActionLog
-	EvRegNewF      EventFlags = (EventFlags)(1) << EvRegNew
-	EvRegDelF      EventFlags = (EventFlags)(1) << EvRegDel
-	EvRegExpiredF  EventFlags = (EventFlags)(1) << EvRegExpired
-	EvSubNewF      EventFlags = (EventFlags)(1) << EvSubNew
-	EvSubDelF      EventFlags = (EventFlags)(1) << EvSubDel
+	EvNoneF         EventFlags = iota
+	EvCallStartF    EventFlags = (EventFlags)(1) << EvCallStart
+	EvCallEndF      EventFlags = (EventFlags)(1) << EvCallEnd
+	EvCallAttemptF  EventFlags = (EventFlags)(1) << EvCallAttempt
+	EvAuthFailedF   EventFlags = (EventFlags)(1) << EvAuthFailed
+	EvActionLogF    EventFlags = (EventFlags)(1) << EvActionLog
+	EvRegNewF       EventFlags = (EventFlags)(1) << EvRegNew
+	EvRegDelF       EventFlags = (EventFlags)(1) << EvRegDel
+	EvRegExpiredF   EventFlags = (EventFlags)(1) << EvRegExpired
+	EvSubNewF       EventFlags = (EventFlags)(1) << EvSubNew
+	EvSubDelF       EventFlags = (EventFlags)(1) << EvSubDel
+	EvOtherFailedF  EventFlags = (EventFlags)(1) << EvOtherFailed
+	EvOtherTimeoutF EventFlags = (EventFlags)(1) << EvOtherTimeout
+	EvOtherOkF      EventFlags = (EventFlags)(1) << EvOtherOk
+	EvParseErrF     EventFlags = (EventFlags)(1) << EvParseErr
+	EvNonSIPprobeF  EventFlags = (EventFlags)(1) << EvNonSIPprobe
 
 	EvRegMaskF EventFlags = EvRegNewF | EvRegDelF | EvRegExpiredF
 )
@@ -236,6 +251,7 @@ func (d *EventData) Fill(ev EventType, e *CallEntry) int {
 	var forcedReason []byte
 	d.Type = ev
 	d.Truncated = false
+	d.Used = 0
 	d.TS = time.Now()
 	d.CreatedTS = e.CreatedTS
 	d.StartTS = e.StartTS
@@ -352,6 +368,90 @@ func (d *EventData) Fill(ev EventType, e *CallEntry) int {
 		d.Truncated = true
 		return d.Valid
 	}
+	return d.Valid
+}
+
+// FillBasic fills only minimal information into an event data
+// (only IP:port source and dest + an optional call-id and a reason).
+// It's purpose is to fill events not base on call state
+// (e.g. for bad sip messages, probes a.s.o.)
+// Returns the number of PFields added. For a valid event, at least 1.
+func (d *EventData) FillBasic(ev EventType,
+	srcIP net.IP, srcPort uint16,
+	dstIP net.IP, dstPort uint16,
+	proto NAddrFlags,
+	callid []byte, reason []byte,
+) int {
+	d.Type = ev
+	d.Truncated = false
+	d.Used = 0
+	d.TS = time.Now()
+	d.CreatedTS = d.TS
+	d.StartTS = d.TS
+	d.ProtoF = proto
+	ip := srcIP
+	n := copy(d.Buf[d.Used:], ip)
+	d.Src = d.Buf[d.Used : d.Used+n]
+	d.Used += n
+	if n < len(ip) {
+		d.Truncated = true
+		return d.Valid
+	}
+	ip = dstIP
+	n = copy(d.Buf[d.Used:], ip)
+	d.Dst = d.Buf[d.Used : d.Used+n]
+	d.Used += n
+	if n < len(ip) {
+		d.Truncated = true
+		return d.Valid
+	}
+	d.SPort = srcPort
+	d.DPort = dstPort
+	d.ReplStatus = 0
+
+	//debug stuff
+	d.ForkedTS = time.Time{}
+	d.State = CallStNone
+	d.PrevState = StateBackTrace{}
+	d.LastMethod[0] = sipsp.MUndef
+	d.LastMethod[1] = sipsp.MUndef
+	d.LastStatus = [2]uint16{0, 1}
+	d.LastEv = EvNone
+	d.EvFlags = EvNoneF
+	d.CFlags = CFNone
+	d.EvGen = EvGenUnknown
+	d.CSeq[0] = 0
+	d.CSeq[1] = 0
+	d.RCSeq[0] = 0
+	d.RCSeq[1] = 0
+	d.Reqs[0] = 0
+	d.Reqs[1] = 0
+	d.Repls[0] = 0
+	d.Repls[1] = 0
+	d.ReqsRetr = [2]uint{0, 0}
+	d.ReplsRetr = [2]uint{0, 0}
+	d.LastMsgs = MsgBackTrace{}
+	// end of debug
+
+	if callid != nil {
+		n = addSlice(callid, &d.CallID, &d.Buf, &d.Used, -1)
+		if n < int(len(callid)) {
+			d.Truncated = true
+			return d.Valid
+		}
+		d.Valid++
+	}
+	// add Reason "by-hand"
+	if reason != nil {
+		n = addSlice(reason,
+			&d.Attrs[AttrReason], &d.Buf, &d.Used, -1)
+		if n < len(reason) {
+			d.Truncated = true
+			return d.Valid
+		}
+		d.Valid++
+	}
+
 	return d.Valid
 }
 

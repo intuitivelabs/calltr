@@ -602,18 +602,27 @@ func finalTimeoutEv(e *CallEntry) EventType {
 
 	// non INVs
 	case CallStFNonInv:
-		// nothing here. For REGISTERs we generate EvRegNew only on reply
+		// For REGISTERs we generate EvRegNew only on reply
 		// so if no reply seen, we won't generate an EvRegDel or EvRegExpired
+		// TODO: review  EvOtherTimeout for REGISTER, BYE, CANCEL
+		event = EvOtherTimeout
+		forcedStatus = 408
+		forcedReason = &timeoutReason
 	case CallStNonInvNegReply:
-		// we care only about REGISTERs timeouts and timeout after
-		// auth. failure at this point. TODO: SUBSCRIBE
+		//  TODO: SUBSCRIBE
 		if authFailure(e.ReplStatus[0]) || authFailure(e.ReplStatus[1]) {
 			event = EvAuthFailed
+		} else {
+			event = EvOtherFailed
 		}
 		// else if REGISTER, like above, do nothing
 	case CallStNonInvFinished:
 		if e.Method == sipsp.MRegister && !e.EvFlags.Test(EvRegDel) {
 			event = EvRegExpired
+		}
+		// for every non-inv that is not a REGISTER => EvOtherOk
+		if e.Method != sipsp.MRegister {
+			event = EvOtherOk
 		}
 
 	case CallStInit:
