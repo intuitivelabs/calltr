@@ -17,7 +17,10 @@ import (
 	"unsafe"
 )
 
-const AllocCallsPerEntry = 2
+// build type constants
+const AllocType = AllocPool        // build time alloc type
+const AllocTypeName = "alloc_pool" // alloc type as string
+const AllocCallsPerEntry = 2       // how many allocs for a CallEntry+buf
 
 // array of sync.pool, each element containing a  pool of
 // raw buffer (&byte[0]) of size index * AllocRoundTo
@@ -28,6 +31,10 @@ var poolCallEntry sync.Pool
 
 // pool for allocating RegEntry
 var poolRegEntry sync.Pool
+
+func init() {
+	BuildTags = append(BuildTags, AllocTypeName)
+}
 
 // AllocCallEntry allocates a CallEntry and the CallEntry.Key.buf.
 // The Key.buf will be keySize bytes length and info.buf infoSize.
@@ -42,8 +49,14 @@ func AllocCallEntry(keySize, infoSize uint) *CallEntry {
 	totalBufSize := keySize + infoSize
 	totalBufSize = ((totalBufSize-1)/AllocRoundTo + 1) * AllocRoundTo //round up
 	var buf []byte
-	pNo := int(totalBufSize / AllocRoundTo)
-	if pNo < len(poolBuffs) {
+	// pool number: pool 0 contains AllocRoundTo size blocks,
+	// pool 1 2*AllocRoundTo size blocks  a.s.o.
+	// pool number -1: is for 0-length allocs
+	pNo := int(totalBufSize/AllocRoundTo) - 1
+	if pNo < 0 {
+		// 0 length alloc attempt (totalBufSize == 0)
+		buf = []byte{} // empty slice
+	} else if pNo < len(poolBuffs) {
 		p, _ := poolBuffs[pNo].Get().(unsafe.Pointer)
 		if p != nil {
 			slice := (*reflect.SliceHeader)(unsafe.Pointer(&buf))
@@ -68,7 +81,7 @@ func AllocCallEntry(keySize, infoSize uint) *CallEntry {
 	if n == nil {
 		n = new(CallEntry)
 		if n == nil {
-			if pNo < len(poolBuffs) {
+			if pNo >= 0 && pNo < len(poolBuffs) {
 				poolBuffs[pNo].Put(unsafe.Pointer(&buf[0]))
 			}
 			CallEntryAllocStats.Failures.Inc(1)
@@ -91,13 +104,10 @@ func AllocCallEntry(keySize, infoSize uint) *CallEntry {
 	n.Key.Init(buf[:keySize])
 	n.Info.Init(buf[keySize:])
 	CallEntryAllocStats.TotalSize.Inc(uint(totalBufSize + callEntrySize))
-	if pNo < len(CallEntryAllocStats.Sizes) {
+	if pNo >= 0 && pNo < len(CallEntryAllocStats.Sizes) {
 		CallEntryAllocStats.Sizes[pNo].Inc(1)
-	} else {
-		CallEntryAllocStats.Sizes[len(CallEntryAllocStats.Sizes)-1].Inc(1)
-	}
-	if int(callEntrySize)/AllocRoundTo < len(CallEntryAllocStats.Sizes) {
-		CallEntryAllocStats.Sizes[callEntrySize/AllocRoundTo].Inc(1)
+	} else if pNo < 0 {
+		CallEntryAllocStats.ZeroSize.Inc(1)
 	} else {
 		CallEntryAllocStats.Sizes[len(CallEntryAllocStats.Sizes)-1].Inc(1)
 	}
@@ -122,8 +132,11 @@ func FreeCallEntry(e *CallEntry) {
 		log.Panicf("FreeCallEntry called for a referenced entry: %p ref: %d\n",
 			e, e.refCnt)
 	}
-	if totalBufSize/AllocRoundTo < len(poolBuffs) {
-		poolBuffs[totalBufSize/AllocRoundTo].Put(unsafe.Pointer(&e.Key.buf[0]))
+	pNo := totalBufSize/AllocRoundTo - 1
+	// poolno -1 used for 0 allocs and poolno > len(poolBuffs) for big allocs
+	// that don't fit in the pools
+	if pNo >= 0 && pNo < len(poolBuffs) {
+		poolBuffs[pNo].Put(unsafe.Pointer(&e.Key.buf[0]))
 	}
 	e.Key.buf = nil
 	e.Info.buf = nil
@@ -143,8 +156,14 @@ func AllocRegEntry(bufSize uint) *RegEntry {
 	totalBufSize = ((totalBufSize-1)/AllocRoundTo + 1) * AllocRoundTo //round up
 
 	var buf []byte
-	pNo := int(totalBufSize / AllocRoundTo)
-	if pNo < len(poolBuffs) {
+	// pool number: pool 0 contains AllocRoundTo size blocks,
+	// pool 1 2*AllocRoundTo size blocks  a.s.o.
+	// pool number -1: is for 0-length allocs
+	pNo := int(totalBufSize/AllocRoundTo) - 1
+	if pNo == -1 {
+		// 0 length alloc attempt (totalBufSize == 0)
+		buf = []byte{} // empty slice
+	} else if pNo < len(poolBuffs) {
 		p, _ := poolBuffs[pNo].Get().(unsafe.Pointer)
 		if p != nil {
 			slice := (*reflect.SliceHeader)(unsafe.Pointer(&buf))
@@ -169,7 +188,7 @@ func AllocRegEntry(bufSize uint) *RegEntry {
 	if n == nil {
 		n = new(RegEntry)
 		if n == nil {
-			if pNo < len(poolBuffs) {
+			if pNo >= 0 && pNo < len(poolBuffs) {
 				poolBuffs[pNo].Put(unsafe.Pointer(&buf[0]))
 			}
 			RegEntryAllocStats.Failures.Inc(1)
@@ -194,17 +213,13 @@ func AllocRegEntry(bufSize uint) *RegEntry {
 	n.buf = buf
 	regESz := unsafe.Sizeof(*n)
 	RegEntryAllocStats.TotalSize.Inc(uint(totalBufSize) + uint(regESz))
-	if pNo < len(RegEntryAllocStats.Sizes) {
+	if pNo >= 0 && pNo < len(RegEntryAllocStats.Sizes) {
 		RegEntryAllocStats.Sizes[pNo].Inc(1)
+	} else if pNo < 0 {
+		RegEntryAllocStats.ZeroSize.Inc(1)
 	} else {
 		RegEntryAllocStats.Sizes[len(RegEntryAllocStats.Sizes)-1].Inc(1)
 	}
-	if int(regESz)/AllocRoundTo < len(RegEntryAllocStats.Sizes) {
-		RegEntryAllocStats.Sizes[regESz/AllocRoundTo].Inc(1)
-	} else {
-		RegEntryAllocStats.Sizes[len(RegEntryAllocStats.Sizes)-1].Inc(1)
-	}
-
 	//DBG("AllocRegEntry(%d) => %p\n", bufSize, n)
 	return n
 
@@ -215,13 +230,16 @@ func FreeRegEntry(e *RegEntry) {
 	//DBG("FreeRegEntry(%p)\n", e)
 	RegEntryAllocStats.FreeCalls.Inc(1)
 	regEntrySize := unsafe.Sizeof(*e)
-	totalBufSize := uintptr(cap(e.buf))
+	totalBufSize := cap(e.buf)
 	if v := atomic.LoadInt32(&e.refCnt); v != 0 {
 		log.Panicf("FreeRegEntry called for a referenced entry: %p ref: %d\n",
 			e, e.refCnt)
 	}
-	if int(totalBufSize/AllocRoundTo) < len(poolBuffs) {
-		poolBuffs[totalBufSize/AllocRoundTo].Put(unsafe.Pointer(&e.buf[0]))
+	pNo := totalBufSize/AllocRoundTo - 1
+	// poolno -1 used for 0 allocs and poolno > len(poolBuffs) for big allocs
+	// that don't fit in the pools
+	if pNo >= 0 && pNo < len(poolBuffs) {
+		poolBuffs[pNo].Put(unsafe.Pointer(&e.buf[0]))
 	}
 	e.buf = nil
 	*e = RegEntry{}           // DBG: zero it to force crashes on re-use w/o alloc

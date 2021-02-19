@@ -16,6 +16,8 @@ import (
 	"time"
 )
 
+var BuildTags []string
+
 func DBG(f string, a ...interface{}) {
 	fmt.Printf("DBG: calltr: "+f, a...)
 }
@@ -665,6 +667,7 @@ errorLocked:
 func Track(m *sipsp.PSIPMsg, n *[2]NetInfo, f HandleEvF) bool {
 	var evd *EventData
 	if f != nil {
+		// TODO: most likely on the heap (due to f(evd)) => sync.pool
 		var buf = make([]byte, EventDataMaxBuf())
 		evd = &EventData{}
 		evd.Init(buf)
@@ -881,6 +884,7 @@ func CallEntriesStatsHash(hs *HStats) uint64 {
 	var total uint64
 	var max uint64
 	var min uint64
+	min = ^(uint64(0))
 	for i := 0; i < len(cstHash.HTable); i++ {
 		cstHash.HTable[i].Lock()
 		n := uint64(cstHash.HTable[i].entries)
@@ -905,6 +909,7 @@ func RegEntriesStatsHash(hs *HStats) uint64 {
 	var total uint64
 	var max uint64
 	var min uint64
+	min = ^(uint64(0))
 	for i := 0; i < len(regHash.HTable); i++ {
 		regHash.HTable[i].Lock()
 		n := uint64(regHash.HTable[i].entries)

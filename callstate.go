@@ -9,8 +9,6 @@ package calltr
 import (
 	"bytes"
 	//	"fmt"
-	"net"
-	// "sync"
 	"strconv" // dbg
 	"sync/atomic"
 	"time"
@@ -819,7 +817,7 @@ func (c *CallEntry) Reset() {
 	buf2 := c.Info.buf
 	*c = CallEntry{}
 	c.Key.buf = buf
-	c.Info.buf = buf2[0:0]
+	c.Info.buf = buf2
 }
 
 /*
@@ -908,88 +906,3 @@ const (
 	CallPartialMatch // CallID
 	CallFullMatch
 )
-
-type NetInfo struct {
-	Port   uint16
-	Flags  NAddrFlags // address family | proto | ...
-	IPAddr [16]byte   // holds IPv4 or IPv6, type in Flags
-}
-
-type NAddrFlags uint8
-
-const (
-	NProtoUDP NAddrFlags = 1 << iota
-	NProtoTCP
-	NProtoSCTP
-	NProtoTLS
-	NProtoDTLS
-	NAddrIPv6
-)
-
-const NProtoMask = NProtoUDP | NProtoTCP | NProtoSCTP | NProtoTLS | NProtoDTLS
-
-var protoNames = [...]string{
-	"udp",
-	"tcp",
-	"sctp",
-	"tls",
-	"dtls",
-}
-
-func (f NAddrFlags) Proto() NAddrFlags {
-	return f & NProtoMask
-}
-
-func (f NAddrFlags) ProtoName() string {
-	for i, v := range protoNames {
-		if f&(1<<uint(i)) != 0 {
-			return v
-		}
-	}
-	return ""
-}
-
-func (n *NetInfo) Reset() {
-	*n = NetInfo{}
-}
-
-func (n *NetInfo) IP() net.IP {
-	if n.Flags&NAddrIPv6 != 0 {
-		return net.IP(n.IPAddr[:])
-	}
-	return net.IP(n.IPAddr[:4])
-}
-
-func (n *NetInfo) SetIP(ip *net.IP) {
-	if len(*ip) == 16 {
-		n.SetIPv6([]byte(*ip))
-		return
-	}
-	n.SetIPv4([]byte(*ip))
-}
-
-func (n *NetInfo) SetIPv4(ip []byte) {
-	copy(n.IPAddr[:], ip[:4])
-	n.Flags &^= NAddrIPv6
-}
-
-func (n *NetInfo) SetIPv6(ip []byte) {
-	copy(n.IPAddr[:], ip[:16])
-	n.Flags |= NAddrIPv6
-}
-
-func (n *NetInfo) SetProto(p NAddrFlags) bool {
-	if p&NProtoMask != 0 {
-		n.Flags |= p
-		return true
-	}
-	return false
-}
-
-func (n *NetInfo) Proto() NAddrFlags {
-	return n.Flags.Proto()
-}
-
-func (n *NetInfo) ProtoName() string {
-	return n.Flags.ProtoName()
-}

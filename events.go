@@ -146,6 +146,20 @@ func (p EvGenPos) String() string {
 	return "unknown"
 }
 
+// EvRateInfo holds the event rate generation and blacklist status.
+type EvRateInfo struct {
+	// how many times the rate was exceeded consecutively
+	// (0 if not exceeded)
+	ExCnt     uint64
+	ExCntDiff uint64        // optional diff from last repot
+	Rate      float64       // current rate value
+	MaxR      float64       // rate that was exceeded
+	Intvl     time.Duration // interval for the rate
+	// when the rate was exceeded the first time or if not exceeded
+	// (ExCnt == 0), the time since the rate is ok
+	T time.Time
+}
+
 type EventData struct {
 	Type       EventType
 	Truncated  bool
@@ -160,6 +174,8 @@ type EventData struct {
 	ReplStatus uint16
 	CallID     sipsp.PField
 	Attrs      [AttrLast]sipsp.PField
+
+	Rate EvRateInfo // event generation rate/blacklisted status
 
 	// debugging
 	ForkedTS   time.Time
@@ -444,6 +460,11 @@ func (ed *EventData) String() string {
 				CallAttrIdx(i), ed.Attrs[i].Get(ed.Buf))
 		}
 	}
+	s += fmt.Sprintf("	blacklisted: %v (t: %d d: %d) rate: %f / %f per %v\n"+
+		"	blacklisted: same state since: %s\n",
+		ed.Rate.ExCnt != 0, ed.Rate.ExCnt, ed.Rate.ExCntDiff,
+		ed.Rate.Rate, ed.Rate.MaxR, ed.Rate.Intvl,
+		ed.Rate.T.Truncate(time.Second))
 	s += fmt.Sprintf("	DBG: state: %q  pstate: %q\n", ed.State, ed.PrevState.String())
 	s += fmt.Sprintf("	DBG: fromTag: %q toTag: %q\n",
 		ed.FromTag.Get(ed.Buf), ed.ToTag.Get(ed.Buf))

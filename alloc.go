@@ -4,7 +4,7 @@
 // that can be found in the LICENSE.txt file in the root of the source
 // tree.
 
-//+build default !alloc_pool,!alloc_oneblock
+//+build default alloc_simple !alloc_pool,!alloc_oneblock
 
 package calltr
 
@@ -15,7 +15,14 @@ import (
 	"unsafe"
 )
 
-const AllocCallsPerEntry = 2
+// build type constants
+const AllocType = AllocSimple        // build time alloc type
+const AllocTypeName = "alloc_simple" // alloc type as string
+const AllocCallsPerEntry = 2         // how many allocs for a CallEntry+buf
+
+func init() {
+	BuildTags = append(BuildTags, AllocTypeName)
+}
 
 // AllocCallEntry allocates a CallEntry and the corresp. CallEntry.Key.buf.
 // The Key.buf will be keySize bytes length and info.buf infoSize.
@@ -54,13 +61,14 @@ func AllocCallEntry(keySize, infoSize uint) *CallEntry {
 	n.Key.Init(buf[:keySize])
 	n.Info.Init(buf[keySize:])
 	CallEntryAllocStats.TotalSize.Inc(uint(totalBufSize + callEntrySize))
-	if int(totalBufSize)/AllocRoundTo < len(CallEntryAllocStats.Sizes) {
-		CallEntryAllocStats.Sizes[totalBufSize/AllocRoundTo].Inc(1)
-	} else {
-		CallEntryAllocStats.Sizes[len(CallEntryAllocStats.Sizes)-1].Inc(1)
-	}
-	if int(callEntrySize)/AllocRoundTo < len(CallEntryAllocStats.Sizes) {
-		CallEntryAllocStats.Sizes[callEntrySize/AllocRoundTo].Inc(1)
+	// pool number: pool 0 contains AllocRoundTo size blocks,
+	// pool 1 2*AllocRoundTo size blocks  a.s.o.
+	// pool number -1: is for 0-length allocs
+	pNo := int(totalBufSize/AllocRoundTo) - 1
+	if pNo >= 0 && pNo < len(CallEntryAllocStats.Sizes) {
+		CallEntryAllocStats.Sizes[pNo].Inc(1)
+	} else if pNo < 0 {
+		CallEntryAllocStats.ZeroSize.Inc(1)
 	} else {
 		CallEntryAllocStats.Sizes[len(CallEntryAllocStats.Sizes)-1].Inc(1)
 	}
@@ -123,17 +131,17 @@ func AllocRegEntry(bufSize uint) *RegEntry {
 	)
 	regESz := unsafe.Sizeof(*n)
 	RegEntryAllocStats.TotalSize.Inc(uint(totalSize) + uint(regESz))
-	if int(totalSize)/AllocRoundTo < len(RegEntryAllocStats.Sizes) {
-		RegEntryAllocStats.Sizes[totalSize/AllocRoundTo].Inc(1)
+	// pool number: pool 0 contains AllocRoundTo size blocks,
+	// pool 1 2*AllocRoundTo size blocks  a.s.o.
+	// pool number -1: is for 0-length allocs
+	pNo := int(totalSize/AllocRoundTo) - 1
+	if pNo >= 0 && pNo < len(RegEntryAllocStats.Sizes) {
+		RegEntryAllocStats.Sizes[pNo].Inc(1)
+	} else if pNo < 0 {
+		RegEntryAllocStats.ZeroSize.Inc(1)
 	} else {
 		RegEntryAllocStats.Sizes[len(RegEntryAllocStats.Sizes)-1].Inc(1)
 	}
-	if int(regESz)/AllocRoundTo < len(RegEntryAllocStats.Sizes) {
-		RegEntryAllocStats.Sizes[regESz/AllocRoundTo].Inc(1)
-	} else {
-		RegEntryAllocStats.Sizes[len(RegEntryAllocStats.Sizes)-1].Inc(1)
-	}
-
 	//DBG("AllocRegEntry(%d) => %p\n", bufSize, n)
 	return n
 

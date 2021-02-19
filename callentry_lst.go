@@ -126,11 +126,11 @@ func (lst *CallEntryLst) ForEach(f func(e *CallEntry) bool) {
 
 // iterates on the entire lists calling f(e) for each element, until
 // false is returned or the lists ends.
-func (lst *CallEntryLst) ForEachSafeRm(f func(e *CallEntry) bool) {
+func (lst *CallEntryLst) ForEachSafeRm(f func(e *CallEntry, l *CallEntryLst) bool) {
 	cont := true
 	s := lst.head.next
 	for v, nxt := s, s.next; v != &lst.head && cont; v, nxt = nxt, nxt.next {
-		cont = f(v)
+		cont = f(v, lst)
 	}
 }
 
