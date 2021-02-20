@@ -4,7 +4,9 @@
 // that can be found in the LICENSE.txt file in the root of the source
 // tree.
 
-//+build default alloc_simple !alloc_pool,!alloc_oneblock
+//+build alloc_simple
+//+build !alloc_pool
+//+build !alloc_oneblock
 
 package calltr
 

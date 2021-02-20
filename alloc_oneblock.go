@@ -5,6 +5,8 @@
 // tree.
 
 //+build alloc_oneblock
+//+build !alloc_pool
+//+build !alloc_simple
 
 package calltr
 
