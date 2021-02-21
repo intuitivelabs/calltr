@@ -6,7 +6,6 @@
 
 //+build alloc_simple
 //+build !alloc_pool
-//+build !alloc_oneblock
 
 package calltr
 

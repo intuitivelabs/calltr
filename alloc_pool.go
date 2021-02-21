@@ -48,6 +48,15 @@ func AllocCallEntry(keySize, infoSize uint) *CallEntry {
 	callEntrySize := uint(unsafe.Sizeof(*n))
 	totalBufSize := keySize + infoSize
 	totalBufSize = ((totalBufSize-1)/AllocRoundTo + 1) * AllocRoundTo //round up
+	totalSize := uint(totalBufSize + callEntrySize)
+
+	maxMem := GetCfg().Mem.MaxCallEntriesMem
+	if CallEntryAllocStats.TotalSize.Inc(totalSize) > maxMem && maxMem > 0 {
+		// limit exceeded
+		CallEntryAllocStats.TotalSize.Dec(totalSize)
+		return nil
+	}
+
 	var buf []byte
 	// pool number: pool 0 contains AllocRoundTo size blocks,
 	// pool 1 2*AllocRoundTo size blocks  a.s.o.
@@ -75,6 +84,7 @@ func AllocCallEntry(keySize, infoSize uint) *CallEntry {
 	}
 	if buf == nil {
 		CallEntryAllocStats.Failures.Inc(1)
+		CallEntryAllocStats.TotalSize.Dec(totalSize)
 		return nil
 	}
 	n, _ = poolCallEntry.Get().(*CallEntry)
@@ -85,6 +95,7 @@ func AllocCallEntry(keySize, infoSize uint) *CallEntry {
 				poolBuffs[pNo].Put(unsafe.Pointer(&buf[0]))
 			}
 			CallEntryAllocStats.Failures.Inc(1)
+			CallEntryAllocStats.TotalSize.Dec(totalSize)
 			return nil
 		}
 		// DBG: extra debugging: when about to be garbage collected, check if
@@ -103,7 +114,6 @@ func AllocCallEntry(keySize, infoSize uint) *CallEntry {
 	n.hashNo = ^uint32(0) // DBG: set invalid hash
 	n.Key.Init(buf[:keySize])
 	n.Info.Init(buf[keySize:])
-	CallEntryAllocStats.TotalSize.Inc(uint(totalBufSize + callEntrySize))
 	if pNo >= 0 && pNo < len(CallEntryAllocStats.Sizes) {
 		CallEntryAllocStats.Sizes[pNo].Inc(1)
 	} else if pNo < 0 {
@@ -154,6 +164,14 @@ func AllocRegEntry(bufSize uint) *RegEntry {
 	RegEntryAllocStats.NewCalls.Inc(1)
 	totalBufSize := bufSize
 	totalBufSize = ((totalBufSize-1)/AllocRoundTo + 1) * AllocRoundTo //round up
+	regESz := unsafe.Sizeof(*n)
+	totalSize := uint(totalBufSize) + uint(regESz)
+
+	maxMem := GetCfg().Mem.MaxRegEntriesMem
+	if RegEntryAllocStats.TotalSize.Inc(totalSize) > maxMem && maxMem > 0 {
+		RegEntryAllocStats.TotalSize.Dec(totalSize)
+		return nil
+	}
 
 	var buf []byte
 	// pool number: pool 0 contains AllocRoundTo size blocks,
@@ -182,6 +200,7 @@ func AllocRegEntry(bufSize uint) *RegEntry {
 	}
 	if buf == nil {
 		RegEntryAllocStats.Failures.Inc(1)
+		RegEntryAllocStats.TotalSize.Dec(totalSize)
 		return nil
 	}
 	n, _ = poolRegEntry.Get().(*RegEntry)
@@ -192,6 +211,7 @@ func AllocRegEntry(bufSize uint) *RegEntry {
 				poolBuffs[pNo].Put(unsafe.Pointer(&buf[0]))
 			}
 			RegEntryAllocStats.Failures.Inc(1)
+			RegEntryAllocStats.TotalSize.Dec(totalSize)
 			return nil
 		}
 		// extra debugging: when about to be garbage collected, check if
@@ -211,8 +231,6 @@ func AllocRegEntry(bufSize uint) *RegEntry {
 	n.hashNo = ^uint32(0) // DBG: set invalid hash
 	n.pos = 0
 	n.buf = buf
-	regESz := unsafe.Sizeof(*n)
-	RegEntryAllocStats.TotalSize.Inc(uint(totalBufSize) + uint(regESz))
 	if pNo >= 0 && pNo < len(RegEntryAllocStats.Sizes) {
 		RegEntryAllocStats.Sizes[pNo].Inc(1)
 	} else if pNo < 0 {

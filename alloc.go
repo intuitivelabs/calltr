@@ -37,14 +37,25 @@ func AllocCallEntry(keySize, infoSize uint) *CallEntry {
 	callEntrySize := uint(unsafe.Sizeof(*n))
 	totalBufSize := keySize + infoSize
 	totalBufSize = ((totalBufSize-1)/AllocRoundTo + 1) * AllocRoundTo //round up
+	totalSize := uint(totalBufSize + callEntrySize)
+
+	maxMem := GetCfg().Mem.MaxCallEntriesMem
+	if CallEntryAllocStats.TotalSize.Inc(totalSize) > maxMem && maxMem > 0 {
+		// limit exceeded
+		CallEntryAllocStats.TotalSize.Dec(totalSize)
+		return nil
+	}
+
 	buf := make([]byte, totalBufSize)
 	if buf == nil {
 		CallEntryAllocStats.Failures.Inc(1)
+		CallEntryAllocStats.TotalSize.Dec(totalSize)
 		return nil
 	}
 	n = new(CallEntry)
 	if n == nil {
 		CallEntryAllocStats.Failures.Inc(1)
+		CallEntryAllocStats.TotalSize.Dec(totalSize)
 		return nil
 	}
 	// DBG: extra debugging: when about to be garbage collected, check if
@@ -62,7 +73,6 @@ func AllocCallEntry(keySize, infoSize uint) *CallEntry {
 	n.hashNo = ^uint32(0) // DBG: set invalid hash
 	n.Key.Init(buf[:keySize])
 	n.Info.Init(buf[keySize:])
-	CallEntryAllocStats.TotalSize.Inc(uint(totalBufSize + callEntrySize))
 	// pool number: pool 0 contains AllocRoundTo size blocks,
 	// pool 1 2*AllocRoundTo size blocks  a.s.o.
 	// pool number -1: is for 0-length allocs
@@ -108,11 +118,21 @@ func FreeCallEntry(e *CallEntry) {
 func AllocRegEntry(bufSize uint) *RegEntry {
 	var e RegEntry
 	RegEntryAllocStats.NewCalls.Inc(1)
-	totalSize := bufSize
-	totalSize = ((totalSize-1)/AllocRoundTo + 1) * AllocRoundTo // round up
-	buf := make([]byte, totalSize)
+	totalBufSize := bufSize
+	totalBufSize = ((totalBufSize-1)/AllocRoundTo + 1) * AllocRoundTo //round up
+	regESz := unsafe.Sizeof(e)
+	totalSize := uint(totalBufSize) + uint(regESz)
+
+	maxMem := GetCfg().Mem.MaxRegEntriesMem
+	if RegEntryAllocStats.TotalSize.Inc(totalSize) > maxMem && maxMem > 0 {
+		RegEntryAllocStats.TotalSize.Dec(totalSize)
+		return nil
+	}
+
+	buf := make([]byte, totalBufSize)
 	if buf == nil {
 		RegEntryAllocStats.Failures.Inc(1)
+		RegEntryAllocStats.TotalSize.Dec(totalSize)
 		return nil
 	}
 	e.hashNo = ^uint32(0) // DBG: set invalid hash
@@ -131,8 +151,6 @@ func AllocRegEntry(bufSize uint) *RegEntry {
 		}
 	},
 	)
-	regESz := unsafe.Sizeof(*n)
-	RegEntryAllocStats.TotalSize.Inc(uint(totalSize) + uint(regESz))
 	// pool number: pool 0 contains AllocRoundTo size blocks,
 	// pool 1 2*AllocRoundTo size blocks  a.s.o.
 	// pool number -1: is for 0-length allocs

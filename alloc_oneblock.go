@@ -41,6 +41,15 @@ func AllocCallEntry(keySize, infoSize uint) *CallEntry {
 	callEntrySize := uint(unsafe.Sizeof(e))
 	totalSize := callEntrySize + keySize + infoSize
 	totalSize = ((totalSize-1)/AllocRoundTo + 1) * AllocRoundTo // round up
+
+	maxMem := GetCfg().Mem.MaxCallEntriesMem
+	if CallEntryAllocStats.TotalSize.Inc(uint(totalSize)) > maxMem &&
+		maxMem > 0 {
+		// limit exceeded
+		CallEntryAllocStats.TotalSize.Dec(uint(totalSize))
+		return nil
+	}
+
 	// TODO: use multiple of block-size blocks and pools for each block size
 	buf := make([]byte, totalSize) //?allignment (seems to be always ok)
 	/* alternative, forcing allignment, error checking skipped:
@@ -54,6 +63,7 @@ func AllocCallEntry(keySize, infoSize uint) *CallEntry {
 	*/
 	if buf == nil {
 		CallEntryAllocStats.Failures.Inc(1)
+		CallEntryAllocStats.TotalSize.Dec(uint(totalSize))
 		return nil
 	}
 	p := unsafe.Pointer(&buf[0])
@@ -74,7 +84,6 @@ func AllocCallEntry(keySize, infoSize uint) *CallEntry {
 	n.hashNo = ^uint32(0) // DBG: set invalid hash
 	n.Key.Init(buf[callEntrySize:(callEntrySize + keySize)])
 	n.Info.Init(buf[(callEntrySize + keySize):])
-	CallEntryAllocStats.TotalSize.Inc(uint(totalSize))
 	// poolno -1 used for 0 allocs and poolno > len(poolBuffs) for big allocs
 	// that don't fit in the pools
 	pNo := int(totalSize/AllocRoundTo) - 1
@@ -129,6 +138,14 @@ func AllocRegEntry(bufSize uint) *RegEntry {
 	regEntrySize := uint(unsafe.Sizeof(e))
 	totalSize := regEntrySize + bufSize
 	totalSize = ((totalSize-1)/AllocRoundTo + 1) * AllocRoundTo // round up
+
+	maxMem := GetCfg().Mem.MaxRegEntriesMem
+	if RegEntryAllocStats.TotalSize.Inc(uint(totalSize)) > maxMem &&
+		maxMem > 0 {
+		RegEntryAllocStats.TotalSize.Dec(uint(totalSize))
+		return nil
+	}
+
 	// TODO: use multiple of block-size blocks and pools for each block size
 	buf := make([]byte, totalSize) //?allignment (seems to be always ok)
 	/* alternative, forcing allignment, error checking skipped:
@@ -142,6 +159,7 @@ func AllocRegEntry(bufSize uint) *RegEntry {
 	*/
 	if buf == nil {
 		RegEntryAllocStats.Failures.Inc(1)
+		RegEntryAllocStats.TotalSize.Dec(uint(totalSize))
 		return nil
 	}
 	slice := (*reflect.SliceHeader)(unsafe.Pointer(&buf))
@@ -155,7 +173,6 @@ func AllocRegEntry(bufSize uint) *RegEntry {
 	//n := &e // quick HACK
 	*n = e
 	n.buf = buf[regEntrySize:]
-	RegEntryAllocStats.TotalSize.Inc(uint(totalSize))
 	// poolno -1 used for 0 allocs and poolno > len(poolBuffs) for big allocs
 	// that don't fit in the pools
 	pNo := int(totalSize/AllocRoundTo) - 1

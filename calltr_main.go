@@ -33,9 +33,19 @@ func ERR(f string, a ...interface{}) {
 	log.Printf("ERROR: calltr: "+f, a...)
 }
 
+// MemConfig holds the memory limits for the various state that is kept.
+// A 0 value means the corresponding check is disabled.
+type MemConfig struct {
+	MaxCallEntries    uint64 // maximum call state entries
+	MaxCallEntriesMem uint64 // maximum memory allowed for call state
+	MaxRegEntries     uint64 // maximum registration bindings
+	MaxRegEntriesMem  uint64 // maximum memory for registration bindings
+}
+
 type Config struct {
 	RegDelta          uint32 // registration expire delta in s, added to expire timeouts
 	ContactIgnorePort bool   // ignore port when comparing contacts (but not in AORs)
+	Mem               MemConfig
 }
 
 var crtCfg *Config = &DefaultConfig
@@ -43,6 +53,12 @@ var crtCfg *Config = &DefaultConfig
 var DefaultConfig = Config{
 	RegDelta:          0,
 	ContactIgnorePort: false,
+	Mem: MemConfig{
+		MaxCallEntries:    0,
+		MaxCallEntriesMem: 0,
+		MaxRegEntries:     0,
+		MaxRegEntriesMem:  0,
+	},
 }
 
 var cstHash CallEntryHash
