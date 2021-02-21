@@ -400,7 +400,8 @@ func (lst *RegEntryLst) FindBindingUnsafe(aor *sipsp.PsipURI, abuf []byte,
 	contact *sipsp.PsipURI, cbuf []byte) *RegEntry {
 	i := 0
 	cMatchFlgs := sipsp.URICmpAll
-	if Cfg.ContactIgnorePort {
+	ignorePort := GetCfg().ContactIgnorePort
+	if ignorePort {
 		cMatchFlgs = sipsp.URICmpSkipPort
 	}
 	loop := false

@@ -743,7 +743,8 @@ func handleRegRepl(e *CallEntry, m *sipsp.PSIPMsg) (event EventType, to TimeoutS
 			event = EvRegDel
 			to = 0
 		} else {
-			to = TimeoutS(exp + Cfg.RegDelta)
+			regDelta := GetCfg().RegDelta
+			to = TimeoutS(exp + regDelta)
 		}
 	} else { // not found
 		event = EvRegDel

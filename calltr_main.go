@@ -9,11 +9,14 @@ package calltr
 import (
 	"bytes"
 	"fmt"
-	"github.com/intuitivelabs/sipsp"
 	"io"
 	"log"
 	"regexp"
+	"sync/atomic"
 	"time"
+	"unsafe"
+
+	"github.com/intuitivelabs/sipsp"
 )
 
 var BuildTags []string
@@ -35,7 +38,12 @@ type Config struct {
 	ContactIgnorePort bool   // ignore port when comparing contacts (but not in AORs)
 }
 
-var Cfg Config
+var crtCfg *Config = &DefaultConfig
+
+var DefaultConfig = Config{
+	RegDelta:          0,
+	ContactIgnorePort: false,
+}
 
 var cstHash CallEntryHash
 var regHash RegEntryHash
@@ -43,6 +51,24 @@ var regHash RegEntryHash
 func init() {
 	cstHash.Init(HashSize)
 	regHash.Init(HashSize)
+}
+
+// SetCfg sets a new global config for calltr.
+// It's atomic so safe to do at run time.
+func SetCfg(cfg *Config) {
+	p := (*unsafe.Pointer)(unsafe.Pointer(&crtCfg))
+	atomic.StorePointer(p, unsafe.Pointer(&crtCfg))
+}
+
+// GetCfg returns a pointer to the current calltr config.
+// The returned config should be treated as "read-only" (changing something
+// in it is not supported).
+// To change a config parameter, make a config copy, change the parameter in
+// the copy and use SetCfg(&copy) to change the running config.
+func GetCfg() *Config {
+	p := atomic.LoadPointer(
+		(*unsafe.Pointer)(unsafe.Pointer(&crtCfg)))
+	return (*Config)(p)
 }
 
 // Locks a CallEntry.
@@ -640,7 +666,7 @@ endLocked:
 			// empty contact valid for a RegDel: e.g. seen only the
 			// reply or a reg ping with no contacts
 			if ev != EvRegDel {
-				BUG("calltr.ProcessMsg: emty aor (%q) or contact(%q) for %p:"+
+				BUG("calltr.ProcessMsg: empty aor (%q) or contact(%q) for %p:"+
 					" ev %d (%q last %q prev) state %q (%q) prev msgs %q "+
 					"cid %q msg:\n%q\n",
 					aor, contact, int(ev), ev.String(),
