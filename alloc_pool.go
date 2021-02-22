@@ -54,6 +54,7 @@ func AllocCallEntry(keySize, infoSize uint) *CallEntry {
 	if CallEntryAllocStats.TotalSize.Inc(totalSize) > maxMem && maxMem > 0 {
 		// limit exceeded
 		CallEntryAllocStats.TotalSize.Dec(totalSize)
+		CallEntryAllocStats.Failures.Inc(1)
 		return nil
 	}
 
@@ -170,6 +171,7 @@ func AllocRegEntry(bufSize uint) *RegEntry {
 	maxMem := GetCfg().Mem.MaxRegEntriesMem
 	if RegEntryAllocStats.TotalSize.Inc(totalSize) > maxMem && maxMem > 0 {
 		RegEntryAllocStats.TotalSize.Dec(totalSize)
+		RegEntryAllocStats.Failures.Inc(1)
 		return nil
 	}
 
