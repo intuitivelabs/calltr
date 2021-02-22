@@ -71,7 +71,11 @@ func init() {
 
 // SetCfg sets a new global config for calltr.
 // It's atomic so safe to do at run time.
+// If cfg is nil, the default config will be used.
 func SetCfg(cfg *Config) {
+	if cfg == nil {
+		cfg = &DefaultConfig
+	}
 	p := (*unsafe.Pointer)(unsafe.Pointer(&crtCfg))
 	atomic.StorePointer(p, unsafe.Pointer(cfg))
 }
