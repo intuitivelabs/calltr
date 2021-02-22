@@ -947,6 +947,7 @@ func newRegEntry(aorURI *sipsp.PsipURI, aor []byte, cURI *sipsp.PsipURI, c []byt
 
 type HStats struct {
 	Total uint64
+	Crt   uint64
 	Max   uint64
 	Min   uint64
 }
@@ -970,6 +971,7 @@ func CallEntriesStatsHash(hs *HStats) uint64 {
 	}
 	if hs != nil {
 		hs.Total = total
+		hs.Crt = cstHash.entries.Get()
 		hs.Max = max
 		hs.Min = min
 	}
@@ -995,6 +997,7 @@ func RegEntriesStatsHash(hs *HStats) uint64 {
 	}
 	if hs != nil {
 		hs.Total = total
+		hs.Crt = cstHash.entries.Get()
 		hs.Max = max
 		hs.Min = min
 	}

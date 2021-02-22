@@ -908,6 +908,7 @@ func (h *EvRateHash) Stats() HStats {
 			s.Min = n
 		}
 	}
+	s.Crt = h.entries.Get()
 	return s
 }
 
