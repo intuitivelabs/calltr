@@ -73,7 +73,7 @@ func init() {
 // It's atomic so safe to do at run time.
 func SetCfg(cfg *Config) {
 	p := (*unsafe.Pointer)(unsafe.Pointer(&crtCfg))
-	atomic.StorePointer(p, unsafe.Pointer(&crtCfg))
+	atomic.StorePointer(p, unsafe.Pointer(cfg))
 }
 
 // GetCfg returns a pointer to the current calltr config.
