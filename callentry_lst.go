@@ -18,7 +18,8 @@ import (
 // hash table and hash bucket lists
 
 type CallEntryHash struct {
-	HTable []CallEntryLst
+	HTable  []CallEntryLst
+	entries StatCounter
 }
 
 func (h *CallEntryHash) Init(sz int) {

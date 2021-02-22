@@ -481,6 +481,12 @@ func forkCallEntry(e *CallEntry, m *sipsp.PSIPMsg, dir int, match CallMatchType,
 // It returns true on success and false on failure.
 // If it returns false, e might be no longer valid (if not referenced before).
 func addCallEntryUnsafe(e *CallEntry, m *sipsp.PSIPMsg, dir int) (bool, EventType) {
+	maxEntries := GetCfg().Mem.MaxCallEntries
+	if cstHash.entries.Inc(1) > maxEntries && maxEntries > 0 {
+		// hash max entries limit exceeded => fail
+		cstHash.entries.Dec(1)
+		return false, EvNone
+	}
 	_, to, _, ev := updateState(e, m, dir)
 	e.Ref() // for the hash
 	cstHash.HTable[e.hashNo].Insert(e)
@@ -489,6 +495,7 @@ func addCallEntryUnsafe(e *CallEntry, m *sipsp.PSIPMsg, dir int) (bool, EventTyp
 	if !csTimerStartUnsafe(e) {
 		cstHash.HTable[e.hashNo].Rm(e)
 		cstHash.HTable[e.hashNo].DecStats()
+		cstHash.entries.Dec(1)
 		e.Unref()
 		return false, ev
 	}
@@ -509,6 +516,7 @@ func unlinkCallEntryUnsafe(e *CallEntry, unref bool) bool {
 	if !cstHash.HTable[e.hashNo].Detached(e) {
 		cstHash.HTable[e.hashNo].Rm(e)
 		cstHash.HTable[e.hashNo].DecStats()
+		cstHash.entries.Dec(1)
 		unlinked = true
 	}
 	if re != nil {
@@ -519,6 +527,7 @@ func unlinkCallEntryUnsafe(e *CallEntry, unref bool) bool {
 		if !regHash.HTable[h].Detached(re) {
 			regHash.HTable[h].Rm(re)
 			regHash.HTable[h].DecStats()
+			regHash.entries.Dec(1)
 			rm = true
 		}
 		if re.ce == e {
@@ -776,16 +785,30 @@ func updateRegCache(event EventType, e *CallEntry, aor []byte, c []byte) (bool, 
 				// remove from hash
 				regHash.HTable[h].Rm(rb)
 				regHash.HTable[h].DecStats()
+				regHash.entries.Dec(1)
 				ce = rb.ce
 				rb.ce = nil // unref ce latter
 				rb.Unref()  // no longer in the hash
 				// later generate a quick expire for the  linked CallEntry
 			}
 			if nRegE != nil {
-				// add the new reg entry to the hash
-				regHash.HTable[h].Insert(nRegE)
-				regHash.HTable[h].IncStats()
-				nRegE.Ref()
+				maxRegEntries := GetCfg().Mem.MaxRegEntries
+				if regHash.entries.Inc(1) > maxRegEntries &&
+					maxRegEntries > 0 {
+					// past the hash limit
+					nRegE.ce.regBinding = nil
+					nRegE.ce.Unref() // not linked anymore from nRegE
+					nRegE.ce = nil
+					nRegE.Unref() // will auto-free on 0 refcnt
+					nRegE = nil
+					//event = EvNone
+					regHash.entries.Dec(1)
+				} else {
+					// add the new reg entry to the hash
+					regHash.HTable[h].Insert(nRegE)
+					regHash.HTable[h].IncStats()
+					nRegE.Ref()
+				}
 			}
 			regHash.HTable[h].Unlock()
 			cstHash.HTable[e.hashNo].Unlock()
@@ -833,6 +856,7 @@ func updateRegCache(event EventType, e *CallEntry, aor []byte, c []byte) (bool, 
 			if !regHash.HTable[h].Detached(rb) {
 				regHash.HTable[h].Rm(rb)
 				regHash.HTable[h].DecStats()
+				regHash.entries.Dec(1)
 				rb.ce = nil
 				rb.Unref() // no longer in the hash
 			}
@@ -862,6 +886,7 @@ func updateRegCache(event EventType, e *CallEntry, aor []byte, c []byte) (bool, 
 			}
 			regHash.HTable[h].Rm(rb)
 			regHash.HTable[h].DecStats()
+			regHash.entries.Dec(1)
 			ce := rb.ce
 			rb.ce = nil
 			regHash.HTable[h].Unlock()

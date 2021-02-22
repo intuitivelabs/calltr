@@ -424,7 +424,8 @@ func (lst *RegEntryLst) FindBindingUnsafe(aor *sipsp.PsipURI, abuf []byte,
 
 // hash table for reg entries (aor uri indexed)
 type RegEntryHash struct {
-	HTable []RegEntryLst
+	HTable  []RegEntryLst
+	entries StatCounter
 }
 
 func (h *RegEntryHash) Init(size int) {
@@ -514,6 +515,7 @@ func (h *RegEntryHash) TimerStartUnsafe(r *RegEntry) bool {
 			if expire.Before(now) || expire.Equal(now) {
 				h.HTable[r.hashNo].Rm(r)
 				h.HTable[r.hashNo].DecStats()
+				h.HTable.entries.Dec(1)
 				atomic.StoreInt32(&r.Timer.done, 1)
 				removed = true
 				ev = EvRegExpired
