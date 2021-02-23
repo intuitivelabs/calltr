@@ -340,8 +340,7 @@ func (h *EvRateHash) Init(sz, maxEntries uint32, maxRates *EvRateMaxes) {
 	if h.cnts.grp == nil {
 		// TODO: better error fallback
 		h.cnts.grp = &counters.Group{}
-		h.cnts.grp.Init("ev_rate_gc_calltr", nil, entries)
-		return
+		h.cnts.grp.Init("ev_rate_gc", nil, entries)
 	}
 	h.cnts.grp.RegisterDefs(evRateCntDefs[:])
 	// TODO: handle failure
