@@ -217,7 +217,8 @@ func newCallEntry(hashNo, cseq uint32, m *sipsp.PSIPMsg, n *[2]NetInfo, dir int,
 		}
 	}
 	e.Info.AddFromMsg(m, dir)
-	e.State = CallStInit
+	e.State = CallStNone
+	chgState(e, CallStInit)
 	csTimerInitUnsafe(e, time.Duration(e.State.TimeoutS())*time.Second)
 	e.hashNo = hashNo
 	e.CSeq[dir] = cseq
@@ -475,6 +476,7 @@ func forkCallEntry(e *CallEntry, m *sipsp.PSIPMsg, dir int, match CallMatchType,
 		n.EvFlags = e.EvFlags &^ EvRegMaskF
 	} else {
 		DBG("forkCallEntry: newCallEntry(...) failed\n")
+		cstHash.cnts.grp.Inc(cstHash.cnts.hFailNew)
 	}
 	return n
 }
@@ -489,6 +491,7 @@ func addCallEntryUnsafe(e *CallEntry, m *sipsp.PSIPMsg, dir int) (bool, EventTyp
 	if cstHash.entries.Inc(1) > maxEntries && maxEntries > 0 {
 		// hash max entries limit exceeded => fail
 		cstHash.entries.Dec(1)
+		cstHash.cnts.grp.Inc(cstHash.cnts.hFailLimEx)
 		return false, EvNone
 	}
 	_, to, _, ev := updateState(e, m, dir)
@@ -503,6 +506,7 @@ func addCallEntryUnsafe(e *CallEntry, m *sipsp.PSIPMsg, dir int) (bool, EventTyp
 		e.Unref()
 		return false, ev
 	}
+	cstHash.cnts.grp.Inc(cstHash.cnts.hActive)
 	// no ref for the timer
 	return true, ev
 }
@@ -521,6 +525,10 @@ func unlinkCallEntryUnsafe(e *CallEntry, unref bool) bool {
 		cstHash.HTable[e.hashNo].Rm(e)
 		cstHash.HTable[e.hashNo].DecStats()
 		cstHash.entries.Dec(1)
+		cstHash.cnts.grp.Dec(cstHash.cnts.hActive)
+		if e.State != CallStNone && e.State != CallStInit {
+			cstHash.cnts.grp.Dec(cstHash.cnts.hState[int(e.State)])
+		}
 		unlinked = true
 	}
 	if re != nil {
@@ -613,6 +621,7 @@ func ProcessMsg(m *sipsp.PSIPMsg, n *[2]NetInfo, f HandleEvF, evd *EventData, fl
 			}
 			if e == nil {
 				DBG("ProcessMsg: newCallEntry() failed on NoMatch\n")
+				cstHash.cnts.grp.Inc(cstHash.cnts.hFailNew)
 				goto errorLocked
 			}
 			e.Ref()

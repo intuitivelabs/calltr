@@ -167,6 +167,7 @@ const (
 	CallStFNonInv // first non-invite
 	CallStNonInvNegReply
 	CallStNonInvFinished
+	CallStNumber // number of states (invalid as state value)
 )
 
 // per state timeout in S
@@ -200,11 +201,55 @@ var callSt2String = [...]string{
 	CallStNonInvFinished: "non-invite finished",
 }
 
+var callSt2Name = [...]string{
+	CallStNone:           "invalid",
+	CallStInit:           "init",
+	CallStFInv:           "inv_1st",
+	CallStEarlyDlg:       "inv_early_dlg",
+	CallStNegReply:       "inv_neg",
+	CallStEstablished:    "inv_established",
+	CallStBye:            "inv_bye_seen",
+	CallStByeReplied:     "inv_bye_repl",
+	CallStCanceled:       "inv_canceled",
+	CallStFNonInv:        "non_inv_1st",
+	CallStNonInvNegReply: "non_inv_neg",
+	CallStNonInvFinished: "non_inv_fin",
+}
+
+var callSt2Desc = [...]string{
+	CallStNone:           "invalid placeholder state",
+	CallStInit:           "initial state",
+	CallStFInv:           "first invite seen",
+	CallStEarlyDlg:       "early dialog",
+	CallStNegReply:       "negative reply for invite based call seen",
+	CallStEstablished:    "call established",
+	CallStBye:            "bye detected",
+	CallStByeReplied:     "bye replied",
+	CallStCanceled:       "call canceled",
+	CallStFNonInv:        "initial non-invite",
+	CallStNonInvNegReply: "non-invite negative reply",
+	CallStNonInvFinished: "non-invite finished",
+}
+
 func (s CallState) String() string {
 	if int(s) >= len(callSt2String) {
 		return "bug - unknown state"
 	}
 	return callSt2String[s]
+}
+
+func (s CallState) Name() string {
+	if int(s) >= len(callSt2Name) {
+		return "bug_unknown_state"
+	}
+	return callSt2Name[s]
+}
+
+func (s CallState) Desc() string {
+	if int(s) >= len(callSt2Name) {
+		return "BUG: unknown state"
+	}
+	return callSt2Desc[s]
 }
 
 func (s CallState) TimeoutS() uint {

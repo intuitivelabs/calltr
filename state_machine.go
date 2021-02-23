@@ -55,6 +55,21 @@ func replRetr(e *CallEntry, m *sipsp.PSIPMsg, dir int) bool {
 	return false
 }
 
+// change state in CallEntry to newSt.
+// sets e.State and returns new state on success, and CallStNone on error
+func chgState(e *CallEntry, newState CallState) CallState {
+	if e.State != newState {
+		if e.State != CallStNone && e.State != CallStInit {
+			cstHash.cnts.grp.Dec(cstHash.cnts.hState[int(e.State)])
+		}
+		e.State = newState
+		if e.State != CallStNone && e.State != CallStInit {
+			cstHash.cnts.grp.Inc(cstHash.cnts.hState[int(e.State)])
+		}
+	}
+	return e.State
+}
+
 // updateStateReq() updates the call state in a forgiving maximum compatibility
 // mode (it will try to recover from skipped messages), for a given request
 // message.
@@ -250,7 +265,7 @@ end:
 	e.prevState.Add(e.State) // debugging
 	e.lastMethod[dir] = mmethod
 	e.lastMsgs.AddReq(mmethod, dir, 0)
-	e.State = newState
+	chgState(e, newState)
 	// add extra event attributes from msg that are not already set
 	e.Info.AddFromMsg(m, dir)
 	event = updateEvent(event, e)
@@ -530,7 +545,7 @@ func updateStateRepl(e *CallEntry, m *sipsp.PSIPMsg, dir int) (CallState, Timeou
 	e.lastMsgs.AddRepl(mstatus, dir, 0)
 	e.ReplsNo[dir]++
 	e.prevState.Add(e.State)
-	e.State = newState
+	chgState(e, newState)
 	// add extra event attributes from msg that are not already set
 	e.Info.AddFromMsg(m, dir)
 	event = updateEvent(event, e)

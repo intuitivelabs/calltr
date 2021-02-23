@@ -12,21 +12,83 @@ import (
 	"sync"
 	//sync "github.com/sasha-s/go-deadlock"
 
+	"github.com/intuitivelabs/counters"
 	"github.com/intuitivelabs/sipsp"
 )
+
+// calls state counters
+type callsStats struct {
+	grp *counters.Group
+
+	hFailNew   counters.Handle
+	hFailLimEx counters.Handle
+
+	hActive counters.Handle
+	hState  [int(CallStNumber)]counters.Handle
+}
 
 // hash table and hash bucket lists
 
 type CallEntryHash struct {
 	HTable  []CallEntryLst
 	entries StatCounter
+	cnts    callsStats
 }
 
 func (h *CallEntryHash) Init(sz int) {
+	// sanity checks
+	states_no := int(CallStNumber)
+	if len(callSt2String) != states_no ||
+		len(callSt2Name) != states_no ||
+		len(callSt2Desc) != states_no {
+		BUG("bad state string, name or desc arrays sizes\n")
+		panic("bad state string, name or desc arrays sizes")
+	}
+
 	h.HTable = make([]CallEntryLst, sz)
 	for i := 0; i < len(h.HTable); i++ {
 		h.HTable[i].Init()
 		h.HTable[i].bucket = uint32(i) // DBG
+	}
+	callsCntDefs := [...]counters.Def{
+		{&h.cnts.hFailNew, 0, nil, nil, "fail_new",
+			"new call tracking entry creation alloc failure"},
+		{&h.cnts.hFailLimEx, 0, nil, nil, "fail_lim",
+			"new call entry creation attempt exceeded entries limit"},
+		{&h.cnts.hActive, counters.CntMaxF, nil, nil, "active",
+			"active tracked calls"},
+	}
+	entries := 50 // extra space to allow registering more counters
+	if entries < len(callsCntDefs) {
+		entries = len(callsCntDefs)
+	}
+	h.cnts.grp = counters.NewGroup("calls", nil, entries)
+	if h.cnts.grp == nil {
+		// TODO: better error fallback
+		h.cnts.grp = &counters.Group{}
+		h.cnts.grp.Init("calls", nil, entries)
+	}
+	if !h.cnts.grp.RegisterDefs(callsCntDefs[:]) {
+		// TODO: better failure handling
+		BUG("CallEntryHash.Init: failed to register counters\n")
+		panic("CallEntryHash.Init: failed to register counters\n")
+	}
+	for i := 0; i < len(h.cnts.hState); i++ {
+		if i == int(CallStNone) || i == int(CallStInit) {
+			// no counter for the "place-holder" states
+			h.cnts.hState[i] = counters.Invalid
+			continue
+		}
+		def := counters.Def{
+			&h.cnts.hState[i], counters.CntMaxF, nil, nil,
+			CallState(i).Name(),
+			CallState(i).Desc(),
+		}
+		if _, ok := h.cnts.grp.RegisterDef(&def); !ok {
+			// TODO: better failure handling
+			BUG("CallEntryHash.Init: failed to register state counters\n")
+			panic("CallEntryHash.Init: failed to register state counters\n")
+		}
 	}
 }
 
