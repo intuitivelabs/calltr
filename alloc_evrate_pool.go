@@ -19,13 +19,20 @@ import (
 // pool for allocating EvRateEntry
 var poolEvRateEntry sync.Pool
 
+const evRateEntrySz = unsafe.Sizeof(EvRateEntry{})
+
 // AllocEvRateEntry allocates an EvRateEntry.
 // It might return nil if the memory limits are exceeded.
 func AllocEvRateEntry() *EvRateEntry {
 	var n *EvRateEntry
 	EvRateEntryAllocStats.NewCalls.Inc(1)
+	pNo := int(evRateEntrySz/AllocRoundTo) - 1 // for nicer accounting
+	if pNo < 0 {
+		pNo = 0
+	}
 	n, _ = poolEvRateEntry.Get().(*EvRateEntry)
 	if n == nil {
+		EvRateEntryAllocStats.PoolMiss[pNo].Inc(1)
 		n = new(EvRateEntry)
 		if n == nil {
 			EvRateEntryAllocStats.Failures.Inc(1)
@@ -43,6 +50,8 @@ func AllocEvRateEntry() *EvRateEntry {
 			}
 		},
 		)
+	} else {
+		EvRateEntryAllocStats.PoolHits[pNo].Inc(1)
 	}
 	*n = EvRateEntry{} // DBG: zero it
 	n.Reset()
