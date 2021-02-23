@@ -15,6 +15,7 @@ import (
 	//	"time"
 	"unsafe"
 
+	"github.com/intuitivelabs/counters"
 	"github.com/intuitivelabs/sipsp"
 )
 
@@ -422,10 +423,21 @@ func (lst *RegEntryLst) FindBindingUnsafe(aor *sipsp.PsipURI, abuf []byte,
 	return nil
 }
 
+// registrations counters
+type regStats struct {
+	grp *counters.Group
+
+	hFailNew   counters.Handle
+	hFailLimEx counters.Handle
+
+	hActive counters.Handle
+}
+
 // hash table for reg entries (aor uri indexed)
 type RegEntryHash struct {
 	HTable  []RegEntryLst
-	entries StatCounter
+	entries StatCounter // TODO: cnts.hActive counts the same thing
+	cnts    regStats
 }
 
 func (h *RegEntryHash) Init(size int) {
@@ -433,6 +445,29 @@ func (h *RegEntryHash) Init(size int) {
 	for i := 0; i < len(h.HTable); i++ {
 		h.HTable[i].Init()
 		h.HTable[i].bucket = uint32(i) // DBG
+	}
+	regsCntDefs := [...]counters.Def{
+		{&h.cnts.hFailNew, 0, nil, nil, "fail_new",
+			"new registration binding creation alloc failure"},
+		{&h.cnts.hFailLimEx, 0, nil, nil, "fail_lim",
+			"new registation binding creation attempt exceeded entries limit"},
+		{&h.cnts.hActive, counters.CntMaxF, nil, nil, "active",
+			"active registrations bindings"},
+	}
+	entries := 20 // extra space to allow registering more counters
+	if entries < len(regsCntDefs) {
+		entries = len(regsCntDefs)
+	}
+	h.cnts.grp = counters.NewGroup("regs", nil, entries)
+	if h.cnts.grp == nil {
+		// TODO: better error fallback
+		h.cnts.grp = &counters.Group{}
+		h.cnts.grp.Init("regs", nil, entries)
+	}
+	if !h.cnts.grp.RegisterDefs(regsCntDefs[:]) {
+		// TODO: better failure handling
+		BUG("RegEntryHash.Init: failed to register counters\n")
+		panic("RegEntryHash.Init: failed to register counters\n")
 	}
 }
 

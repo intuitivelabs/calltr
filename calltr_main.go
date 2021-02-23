@@ -540,6 +540,7 @@ func unlinkCallEntryUnsafe(e *CallEntry, unref bool) bool {
 			regHash.HTable[h].Rm(re)
 			regHash.HTable[h].DecStats()
 			regHash.entries.Dec(1)
+			regHash.cnts.grp.Dec(regHash.cnts.hActive)
 			rm = true
 		}
 		if re.ce == e {
@@ -784,6 +785,8 @@ func updateRegCache(event EventType, e *CallEntry, aor []byte, c []byte) (bool, 
 				nRegE.ce = e
 				e.regBinding = nRegE
 				nRegE.hashNo = h
+			} else {
+				regHash.cnts.grp.Inc(regHash.cnts.hFailNew)
 			}
 			// check if the current binding is not in the cache
 			var ce *CallEntry
@@ -799,6 +802,7 @@ func updateRegCache(event EventType, e *CallEntry, aor []byte, c []byte) (bool, 
 				regHash.HTable[h].Rm(rb)
 				regHash.HTable[h].DecStats()
 				regHash.entries.Dec(1)
+				regHash.cnts.grp.Dec(regHash.cnts.hActive)
 				ce = rb.ce
 				rb.ce = nil // unref ce latter
 				rb.Unref()  // no longer in the hash
@@ -816,10 +820,12 @@ func updateRegCache(event EventType, e *CallEntry, aor []byte, c []byte) (bool, 
 					nRegE = nil
 					//event = EvNone
 					regHash.entries.Dec(1)
+					regHash.cnts.grp.Inc(regHash.cnts.hFailLimEx)
 				} else {
 					// add the new reg entry to the hash
 					regHash.HTable[h].Insert(nRegE)
 					regHash.HTable[h].IncStats()
+					regHash.cnts.grp.Inc(regHash.cnts.hActive)
 					nRegE.Ref()
 				}
 			}
@@ -870,6 +876,7 @@ func updateRegCache(event EventType, e *CallEntry, aor []byte, c []byte) (bool, 
 				regHash.HTable[h].Rm(rb)
 				regHash.HTable[h].DecStats()
 				regHash.entries.Dec(1)
+				regHash.cnts.grp.Dec(regHash.cnts.hActive)
 				rb.ce = nil
 				rb.Unref() // no longer in the hash
 			}
@@ -900,6 +907,7 @@ func updateRegCache(event EventType, e *CallEntry, aor []byte, c []byte) (bool, 
 			regHash.HTable[h].Rm(rb)
 			regHash.HTable[h].DecStats()
 			regHash.entries.Dec(1)
+			regHash.cnts.grp.Dec(regHash.cnts.hActive)
 			ce := rb.ce
 			rb.ce = nil
 			regHash.HTable[h].Unlock()
