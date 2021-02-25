@@ -243,7 +243,7 @@ func (d *EventData) encryptIPv4(key [16]byte) (err error) {
 	if c, err = ipcrypt.EncryptBin(key, d.Dst); err != nil {
 		return
 	}
-	if err = setIPv4Bytes(d.Src, c); err != nil {
+	if err = setIPv4Bytes(d.Dst, c); err != nil {
 		return
 	}
 	return
