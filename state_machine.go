@@ -55,10 +55,23 @@ func replRetr(e *CallEntry, m *sipsp.PSIPMsg, dir int) bool {
 	return false
 }
 
-// change state in CallEntry to newSt.
-// sets e.State and returns new state on success, and CallStNone on error
-func chgState(e *CallEntry, newState CallState) CallState {
+// change state (and related info) in CallEntry to newState.
+// The parameters are the CalLEntry. newState and the message "direction"
+// that caused the update (0 from caller, 1 from callee, -1 due to internal
+// timeout).
+// returns new state on success, and CallStNone on error
+func chgState(e *CallEntry, newState CallState, dir int) CallState {
 	if e.State != newState {
+		switch newState {
+		case CallStBye, CallStByeReplied:
+			if dir == 1 {
+				e.Flags |= CFCalleeTerminated
+			} else if newState == CallStByeReplied {
+				// dir != 1 and BYE replied => reply to BYE from caller or
+				// timeout => reset CFCalleeTerminated
+				e.Flags &= ^CFCalleeTerminated
+			}
+		}
 		if e.State != CallStNone && e.State != CallStInit {
 			cstHash.cnts.grp.Dec(cstHash.cnts.hState[int(e.State)])
 		}
@@ -265,7 +278,7 @@ end:
 	e.prevState.Add(e.State) // debugging
 	e.lastMethod[dir] = mmethod
 	e.lastMsgs.AddReq(mmethod, dir, 0)
-	chgState(e, newState)
+	chgState(e, newState, dir)
 	// add extra event attributes from msg that are not already set
 	e.Info.AddFromMsg(m, dir)
 	event = updateEvent(event, e)
@@ -428,7 +441,7 @@ func updateStateRepl(e *CallEntry, m *sipsp.PSIPMsg, dir int) (CallState, Timeou
 				} else {
 					newState = CallStNonInvFinished
 					if mmethod == sipsp.MRegister {
-						// reply to REGISTER without seen the request
+						// reply to REGISTER without seeing the request
 						event = EvRegNew
 						exp, _ := m.PV.MaxExpires()
 						to = TimeoutS(exp)
@@ -545,7 +558,7 @@ func updateStateRepl(e *CallEntry, m *sipsp.PSIPMsg, dir int) (CallState, Timeou
 	e.lastMsgs.AddRepl(mstatus, dir, 0)
 	e.ReplsNo[dir]++
 	e.prevState.Add(e.State)
-	chgState(e, newState)
+	chgState(e, newState, dir)
 	// add extra event attributes from msg that are not already set
 	e.Info.AddFromMsg(m, dir)
 	event = updateEvent(event, e)
@@ -576,7 +589,7 @@ func updateState(e *CallEntry, m *sipsp.PSIPMsg, dir int) (CallState, TimeoutS, 
 // reported reason for internal timeouts
 var timeoutReason = []byte("internal: call state timeout")
 
-// finalTimeoutEv() should be called before destroying and expired call entry.
+// finalTimeoutEv() should be called before destroying an expired call entry.
 // It returns the final EventType
 // unsafe, MUST be called w/ lock held or if no parallel access is possible
 func finalTimeoutEv(e *CallEntry) EventType {
@@ -590,14 +603,17 @@ func finalTimeoutEv(e *CallEntry) EventType {
 		event = EvCallAttempt
 		forcedStatus = 408
 		forcedReason = &timeoutReason
+		e.Flags |= CFForcedTimeout
 	case CallStEarlyDlg: // early dialog timeout
 		event = EvCallAttempt
 		forcedStatus = 408
 		forcedReason = &timeoutReason
+		e.Flags |= CFForcedTimeout
 	case CallStEstablished: // call timeout
 		event = EvCallEnd
 		forcedStatus = 408
 		forcedReason = &timeoutReason
+		e.Flags |= CFForcedTimeout
 
 	case CallStBye: // call established, BYE sent, but not replied
 		event = EvCallEnd // should've been already generated on BYE
@@ -623,6 +639,7 @@ func finalTimeoutEv(e *CallEntry) EventType {
 		event = EvOtherTimeout
 		forcedStatus = 408
 		forcedReason = &timeoutReason
+		e.Flags |= CFForcedTimeout
 	case CallStNonInvNegReply:
 		//  TODO: SUBSCRIBE
 		if authFailure(e.ReplStatus[0]) || authFailure(e.ReplStatus[1]) {

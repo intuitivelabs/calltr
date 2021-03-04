@@ -218,7 +218,7 @@ func newCallEntry(hashNo, cseq uint32, m *sipsp.PSIPMsg, n *[2]NetInfo, dir int,
 	}
 	e.Info.AddFromMsg(m, dir)
 	e.State = CallStNone
-	chgState(e, CallStInit)
+	chgState(e, CallStInit, dir)
 	csTimerInitUnsafe(e, time.Duration(e.State.TimeoutS())*time.Second)
 	e.hashNo = hashNo
 	e.CSeq[dir] = cseq

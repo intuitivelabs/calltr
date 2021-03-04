@@ -192,6 +192,8 @@ type EventData struct {
 
 	Rate EvRateInfo // event generation rate/blacklisted status
 
+	CFlags CallFlags // info about who terminated the call, timeouts a.s.o.
+
 	// debugging
 	ForkedTS   time.Time
 	State      CallState
@@ -200,7 +202,6 @@ type EventData struct {
 	LastStatus [2]uint16
 	LastEv     EventType
 	EvFlags    EventFlags
-	CFlags     CallFlags
 	CSeq       [2]uint32
 	RCSeq      [2]uint32
 	Reqs       [2]uint
@@ -373,7 +374,7 @@ func (d *EventData) Fill(ev EventType, e *CallEntry) int {
 
 // FillBasic fills only minimal information into an event data
 // (only IP:port source and dest + an optional call-id and a reason).
-// It's purpose is to fill events not base on call state
+// It's purpose is to fill events not based on call state
 // (e.g. for bad sip messages, probes a.s.o.)
 // Returns the number of PFields added. For a valid event, at least 1.
 func (d *EventData) FillBasic(ev EventType,
@@ -593,6 +594,7 @@ type HandleEvF func(callev *EventData)
 
 // update "event state", catching already generated events
 // returns ev or EvNone (if event was a retr)
+// Side-effect: it sets CallEntry.StartTS for EvCallStart. EvRegNew, EvSubNew.
 // unsafe, MUST be called w/ _e_ lock held or if no parallel access is possible
 func updateEvent(ev EventType, e *CallEntry) EventType {
 	// new event only if entry was not already canceled and event not

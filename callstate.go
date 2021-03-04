@@ -259,7 +259,7 @@ func (s CallState) TimeoutS() uint {
 	return stateTimeoutS[s]
 }
 
-type CallFlags uint8
+type CallFlags uint16
 
 const CFNone CallFlags = 0
 const (
@@ -268,9 +268,11 @@ const (
 	CFRegReplacedHack           // REGISTER re-use hack
 	CFForkChild
 	CFForkParent
-	CFCanceled       // CANCEL seem
-	CFInternalCancel // fin reply recv on some branch: internal cancel
-	CFTimeout
+	CFCanceled         // CANCEL seen
+	CFInternalCancel   // fin reply recv on some branch: internal cancel
+	CFTimeout          // timeout
+	CFForcedTimeout    // terminated due to forced timeout
+	CFCalleeTerminated // call terminated by callee
 )
 
 // debugging, keep in sync with the CallFlags consts above
@@ -284,6 +286,8 @@ var cfNames = [...]string{
 	"Canceled",
 	"Internal_Cancel",
 	"Timeout",
+	"Forced_Timeout",
+	"Callee_Terminated",
 	"invalid",
 	"invalid",
 	"invalid",
@@ -826,12 +830,12 @@ type CallEntry struct {
 	ReqsNo     [2]uint
 	ReplsNo    [2]uint
 	ReplStatus [2]uint16
-	hashNo     uint32          // cache hash value
-	Method     sipsp.SIPMethod // creating method
+	hashNo     uint32 // cache hash value
 	Flags      CallFlags
+	EvFlags    EventFlags      // sent/generated events
+	Method     sipsp.SIPMethod // creating method
 	State      CallState
-	EvFlags    EventFlags // sent/generated events
-	evHandler  HandleEvF  // event handler function
+	evHandler  HandleEvF // event handler function
 
 	// used only for REGISTERS:
 	regBinding *RegEntry // pointer to cached registry binding
