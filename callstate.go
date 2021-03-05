@@ -842,7 +842,6 @@ type CallEntry struct {
 
 	// TODO: replace all time.Time with uint64 (time.Time is too big and
 	//       has a time zone _pointer_ inside causing extra uneeded GC work)
-	StartTS        time.Time // call established time
 	FinReplTS      time.Time // final call establisment reply (>= 200)
 	EarlyDlgTS     time.Time // early dialog (18x)
 	CreatedTS      time.Time // call entry creation time

@@ -180,7 +180,6 @@ type EventData struct {
 	Truncated bool
 	TS        time.Time // event creation time
 	CreatedTS time.Time // call entry creation
-	StartTS   time.Time // call start - OBSOLETED by FinReplTS
 	// final call establisment reply (>= 200), e.g. 2xx or 4xx time
 	// (note: this is for the initial call-establishing request)
 	FinReplTS  time.Time
@@ -259,7 +258,6 @@ func (d *EventData) Fill(ev EventType, e *CallEntry) int {
 	d.Used = 0
 	d.TS = time.Now()
 	d.CreatedTS = e.CreatedTS
-	d.StartTS = e.StartTS
 	d.FinReplTS = e.FinReplTS
 	d.EarlyDlgTS = e.EarlyDlgTS
 	d.ProtoF = e.EndPoint[0].Proto()
@@ -394,7 +392,6 @@ func (d *EventData) FillBasic(ev EventType,
 	d.Used = 0
 	d.TS = time.Now()
 	d.CreatedTS = d.TS
-	d.StartTS = d.TS
 	d.FinReplTS = time.Time{}  // zero
 	d.EarlyDlgTS = time.Time{} // zero
 	d.ProtoF = proto
@@ -473,7 +470,6 @@ func (d *EventData) FillFromRegEntry(ev EventType, e *RegEntry) int {
 	d.Truncated = false
 	d.TS = time.Now()
 	d.CreatedTS = e.CreatedTS
-	d.StartTS = e.CreatedTS // for a RegEntry these are the same
 	d.FinReplTS = e.FinReplTS
 	d.EarlyDlgTS = e.EarlyDlgTS
 	d.ProtoF = e.EndPoint[0].Proto()
@@ -545,13 +541,11 @@ func (d *EventData) FillFromRegEntry(ev EventType, e *RegEntry) int {
 // mostly for debugging
 func (ed *EventData) String() string {
 	var duration, pdd, ringt time.Duration
-	if !ed.StartTS.IsZero() {
-		duration = ed.TS.Sub(ed.StartTS)
-	}
 	if !ed.EarlyDlgTS.IsZero() {
 		pdd = ed.EarlyDlgTS.Sub(ed.CreatedTS)
 	}
 	if !ed.FinReplTS.IsZero() {
+		duration = ed.TS.Sub(ed.FinReplTS)
 		if ed.EarlyDlgTS.IsZero() {
 			pdd = ed.FinReplTS.Sub(ed.CreatedTS)
 		} else {
@@ -571,7 +565,7 @@ func (ed *EventData) String() string {
 		ed.TS.Truncate(time.Second),
 		ed.CreatedTS.Truncate(time.Second),
 		time.Now().Sub(ed.CreatedTS).Truncate(time.Second),
-		ed.StartTS.Truncate(time.Second),
+		ed.FinReplTS.Truncate(time.Second),
 		duration,
 		pdd, ringt,
 		ed.ProtoF.ProtoName(), ed.Src, ed.SPort, ed.Dst, ed.DPort,
@@ -616,7 +610,6 @@ type HandleEvF func(callev *EventData)
 
 // update "event state", catching already generated events
 // returns ev or EvNone (if event was a retr)
-// Side-effect: it sets CallEntry.StartTS for EvCallStart. EvRegNew, EvSubNew.
 // unsafe, MUST be called w/ _e_ lock held or if no parallel access is possible
 func updateEvent(ev EventType, e *CallEntry) EventType {
 	// new event only if entry was not already canceled and event not
@@ -624,8 +617,6 @@ func updateEvent(ev EventType, e *CallEntry) EventType {
 	if ev != EvNone && (e.Flags&CFCanceled == 0) && !e.EvFlags.Set(ev) {
 		// event not seen before
 		switch ev {
-		case EvCallStart, EvRegNew, EvSubNew:
-			e.StartTS = time.Now() // OBSOLETED by e.FinReplTS
 		case EvCallAttempt:
 			// report call attempts only once per call and not per each
 			//  branch and only if no EvCallStart or EvCallEnd seen.
