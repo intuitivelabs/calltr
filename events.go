@@ -176,11 +176,15 @@ type EvRateInfo struct {
 }
 
 type EventData struct {
-	Type       EventType
-	Truncated  bool
-	TS         time.Time // event creation time
-	CreatedTS  time.Time // call entry creation
-	StartTS    time.Time // call start
+	Type      EventType
+	Truncated bool
+	TS        time.Time // event creation time
+	CreatedTS time.Time // call entry creation
+	StartTS   time.Time // call start - OBSOLETED by FinReplTS
+	// final call establisment reply (>= 200), e.g. 2xx or 4xx time
+	// (note: this is for the initial call-establishing request)
+	FinReplTS  time.Time
+	EarlyDlgTS time.Time // early dialog (18x), 0 if no 18x
 	Src        net.IP
 	Dst        net.IP
 	SPort      uint16
@@ -256,6 +260,8 @@ func (d *EventData) Fill(ev EventType, e *CallEntry) int {
 	d.TS = time.Now()
 	d.CreatedTS = e.CreatedTS
 	d.StartTS = e.StartTS
+	d.FinReplTS = e.FinReplTS
+	d.EarlyDlgTS = e.EarlyDlgTS
 	d.ProtoF = e.EndPoint[0].Proto()
 	ip := e.EndPoint[0].IP()
 	n := copy(d.Buf[d.Used:], ip)
@@ -389,6 +395,8 @@ func (d *EventData) FillBasic(ev EventType,
 	d.TS = time.Now()
 	d.CreatedTS = d.TS
 	d.StartTS = d.TS
+	d.FinReplTS = time.Time{}  // zero
+	d.EarlyDlgTS = time.Time{} // zero
 	d.ProtoF = proto
 	ip := srcIP
 	n := copy(d.Buf[d.Used:], ip)
@@ -466,6 +474,8 @@ func (d *EventData) FillFromRegEntry(ev EventType, e *RegEntry) int {
 	d.TS = time.Now()
 	d.CreatedTS = e.CreatedTS
 	d.StartTS = e.CreatedTS // for a RegEntry these are the same
+	d.FinReplTS = e.FinReplTS
+	d.EarlyDlgTS = e.EarlyDlgTS
 	d.ProtoF = e.EndPoint[0].Proto()
 	ip := e.EndPoint[0].IP()
 	n := copy(d.Buf[d.Used:], ip)
@@ -534,15 +544,26 @@ func (d *EventData) FillFromRegEntry(ev EventType, e *RegEntry) int {
 
 // mostly for debugging
 func (ed *EventData) String() string {
-	var duration time.Duration
+	var duration, pdd, ringt time.Duration
 	if !ed.StartTS.IsZero() {
 		duration = ed.TS.Sub(ed.StartTS)
+	}
+	if !ed.EarlyDlgTS.IsZero() {
+		pdd = ed.EarlyDlgTS.Sub(ed.CreatedTS)
+	}
+	if !ed.FinReplTS.IsZero() {
+		if ed.EarlyDlgTS.IsZero() {
+			pdd = ed.FinReplTS.Sub(ed.CreatedTS)
+		} else {
+			ringt = ed.FinReplTS.Sub(ed.EarlyDlgTS)
+		}
 	}
 	s := fmt.Sprintf(
 		"Type: %s [truncated: %v valid fields: %2d used: %5d/%5d]\n"+
 			"	ts        : %s\n"+
 			"	created   : %s (%s ago)\n"+
 			"	call-start: %s duration: %s \n"+
+			"	pdd       : %s ring time %s \n"+
 			"	protocol  : %s  %s:%d -> %s:%d\n"+
 			"	sip.call_id: %s\n"+
 			"	sip.response.status: %3d\n",
@@ -552,6 +573,7 @@ func (ed *EventData) String() string {
 		time.Now().Sub(ed.CreatedTS).Truncate(time.Second),
 		ed.StartTS.Truncate(time.Second),
 		duration,
+		pdd, ringt,
 		ed.ProtoF.ProtoName(), ed.Src, ed.SPort, ed.Dst, ed.DPort,
 		ed.CallID.Get(ed.Buf),
 		ed.ReplStatus)
@@ -603,7 +625,7 @@ func updateEvent(ev EventType, e *CallEntry) EventType {
 		// event not seen before
 		switch ev {
 		case EvCallStart, EvRegNew, EvSubNew:
-			e.StartTS = time.Now()
+			e.StartTS = time.Now() // OBSOLETED by e.FinReplTS
 		case EvCallAttempt:
 			// report call attempts only once per call and not per each
 			//  branch and only if no EvCallStart or EvCallEnd seen.

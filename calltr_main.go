@@ -224,7 +224,7 @@ func newCallEntry(hashNo, cseq uint32, m *sipsp.PSIPMsg, n *[2]NetInfo, dir int,
 	e.CSeq[dir] = cseq
 	e.Method = m.Method()
 	e.evHandler = evH
-	e.CreatedTS = time.Now() // debugging
+	e.CreatedTS = time.Now()
 	if n != nil {
 		e.EndPoint = *n // FIXME
 	}
