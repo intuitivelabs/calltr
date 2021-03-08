@@ -40,8 +40,7 @@ func (h *CallEntryHash) Init(sz int) {
 	if len(callSt2String) != states_no ||
 		len(callSt2Name) != states_no ||
 		len(callSt2Desc) != states_no {
-		BUG("bad state string, name or desc arrays sizes\n")
-		panic("bad state string, name or desc arrays sizes")
+		Log.PANIC("bad state string, name or desc arrays sizes\n")
 	}
 
 	h.HTable = make([]CallEntryLst, sz)
@@ -69,8 +68,7 @@ func (h *CallEntryHash) Init(sz int) {
 	}
 	if !h.cnts.grp.RegisterDefs(callsCntDefs[:]) {
 		// TODO: better failure handling
-		BUG("CallEntryHash.Init: failed to register counters\n")
-		panic("CallEntryHash.Init: failed to register counters\n")
+		Log.PANIC("CallEntryHash.Init: failed to register counters\n")
 	}
 	for i := 0; i < len(h.cnts.hState); i++ {
 		if i == int(CallStNone) || i == int(CallStInit) {
@@ -85,8 +83,7 @@ func (h *CallEntryHash) Init(sz int) {
 		}
 		if _, ok := h.cnts.grp.RegisterDef(&def); !ok {
 			// TODO: better failure handling
-			BUG("CallEntryHash.Init: failed to register state counters\n")
-			panic("CallEntryHash.Init: failed to register state counters\n")
+			Log.PANIC("CallEntryHash.Init: failed to register state counters\n")
 		}
 	}
 }

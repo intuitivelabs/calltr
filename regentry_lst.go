@@ -454,8 +454,7 @@ func (h *RegEntryHash) Init(size int) {
 	}
 	if !h.cnts.grp.RegisterDefs(regsCntDefs[:]) {
 		// TODO: better failure handling
-		BUG("RegEntryHash.Init: failed to register counters\n")
-		panic("RegEntryHash.Init: failed to register counters\n")
+		Log.PANIC("RegEntryHash.Init: failed to register counters\n")
 	}
 }
 
