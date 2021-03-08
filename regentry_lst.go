@@ -82,20 +82,16 @@ import (
 type RegEntry struct {
 	next, prev *RegEntry // links into the reg. bindings hash
 	AOR        sipsp.PField
-	Contact    sipsp.PField  // TODO
+	Contact    sipsp.PField
 	AORURI     sipsp.PsipURI // parsed URI
-	ContactURI sipsp.PsipURI // TODO
+	ContactURI sipsp.PsipURI
 	// Expire     uint32
 
 	hashNo uint32
 	ce     *CallEntry // pointer to corrsp. CallEntry
-	//CreatedTS time.Time
-	//evHandler HandleEvF // event handler function
 
-	//Timer  TimerInfo // TODO: might not be needed if we link it to CallEntry
 	refCnt int32
 
-	//EndPoint [2]NetInfo // last src/dst
 	pos int    // used bytes in buf / current append offset
 	buf []byte // sipsp.PField(s) above point inside it
 }
@@ -219,23 +215,6 @@ func (r *RegEntry) addPField(f sipsp.PField, buf []byte) (sipsp.PField, bool) {
 	return ret, true
 
 }
-
-/*
-// Init timer
-func (r *RegEntry) TimerInit(after time.Duration) {
-	r.Timer.Init(after)
-}
-
-// Try to stop the timer, returns true if it succeeds
-func (r *RegEntry) TimerTryStop() bool {
-	return r.Timer.TryStop()
-}
-
-// Update the timeout, according to the passed flags.
-func (r *RegEntry) TimerUpdate(after time.Duration, f TimerUpdateF) bool {
-	return r.Timer.UpdateTimeout(after, f)
-}
-*/
 
 type RegEntryLst struct {
 	head RegEntry // used only as list head (only next & prev are valid)
@@ -509,70 +488,6 @@ func (h *RegEntryHash) Destroy() {
 	}
 	h.HTable = nil
 }
-
-/*
-// Start the timer for the specified version.
-// Unsafe version, must be called with locks held.
-// Returns true if it succeeds, false on error
-func (h *RegEntryHash) TimerStartUnsafe(r *RegEntry) bool {
-	// timeout handler
-	regTimer := func() {
-		now := time.Now()
-		// allow for small errors
-		expire := r.Timer.Expire.Add(-time.Second / 10) // sub sec/10
-		if expire.Before(now) || expire.Equal(now) {
-			ev := EvNone
-			var evd *EventData
-			if r.evHandler != nil {
-				evd = &EventData{}
-				buf := make([]byte, EventDataMaxBuf())
-				evd.Init(buf)
-			}
-			// if expired remove cs from the hash
-			h.HTable[r.hashNo].Lock()
-			removed := false
-			// check again, in case we are racing with an Update
-			expire := r.Timer.Expire.Add(-time.Second / 10) // sub sec/10
-			if expire.Before(now) || expire.Equal(now) {
-				h.HTable[r.hashNo].Rm(r)
-				h.HTable[r.hashNo].DecStats()
-				h.HTable.entries.Dec(1)
-				atomic.StoreInt32(&r.Timer.done, 1)
-				removed = true
-				ev = EvRegExpired
-				if evd != nil {
-					// event not seen before, report...
-					// fill event data while locked, but process it
-					// once unlocked
-					// TODO: evd.FillRegEntry(ev, r)
-				}
-			}
-			h.HTable[r.hashNo].Unlock()
-			// mark timer as dead/done
-			if removed {
-				// call event callback, outside the hash lock
-				if ev != EvNone && evd != nil && r.evHandler != nil {
-					r.evHandler(evd)
-				}
-				r.Unref()
-				return
-			} // else fall-through
-		}
-		// else if timeout extended reset timer
-		// make sure the timer is set, before executing
-		handleAddr := (*unsafe.Pointer)(unsafe.Pointer(&r.Timer.Handle))
-		// avoid racing by waiting till the timer handle is set
-		// (in case the timer handle was executed before the timer
-		//  handle value was saved)
-		for atomic.LoadPointer(handleAddr) == nil {
-			runtime.Gosched()
-		}
-		r.Timer.Handle.Reset(r.Timer.Expire.Sub(now))
-	}
-
-	return r.Timer.Start(regTimer)
-}
-*/
 
 func (h *RegEntryHash) Hash(buf []byte, offs int, l int) uint32 {
 	return GetHash(buf, offs, l) % uint32(len(h.HTable))
