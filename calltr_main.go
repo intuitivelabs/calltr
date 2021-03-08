@@ -174,7 +174,9 @@ func newCallEntry(hashNo, cseq uint32, m *sipsp.PSIPMsg, n *[2]NetInfo, dir int,
 	infoSize := infoReserveSize(m, dir)
 	e := AllocCallEntry(keySize, infoSize)
 	if e == nil {
-		DBG("newCallEntry: AllocEntry(%d, %d) failed\n", keySize, infoSize)
+		if DBGon() {
+			DBG("newCallEntry: AllocEntry(%d, %d) failed\n", keySize, infoSize)
+		}
 		return nil
 	}
 	// TODO: if dir == 1 (e.g. fork on partial match from the other side)
@@ -323,8 +325,10 @@ func forkCallEntry(e *CallEntry, m *sipsp.PSIPMsg, dir int, match CallMatchType,
 				e.Flags |= CFReused
 				return e
 			}
-			DBG("forkCallEntry: CallPartialMatch: SetToTag(%q) failed\n",
-				newToTag.Get(m.Buf))
+			if DBGon() {
+				DBG("forkCallEntry: CallPartialMatch: SetToTag(%q) failed\n",
+					newToTag.Get(m.Buf))
+			}
 			// update failed => not enough space => fallback to fork call entry
 
 			// TODO: else if REGISTER call entry and m is reply and
@@ -461,7 +465,9 @@ func forkCallEntry(e *CallEntry, m *sipsp.PSIPMsg, dir int, match CallMatchType,
 		// to-tag)
 		n.EvFlags = e.EvFlags &^ EvRegMaskF
 	} else {
-		DBG("forkCallEntry: newCallEntry(...) failed\n")
+		if DBGon() {
+			DBG("forkCallEntry: newCallEntry(...) failed\n")
+		}
 		cstHash.cnts.grp.Inc(cstHash.cnts.hFailNew)
 	}
 	return n
@@ -520,7 +526,6 @@ func unlinkCallEntryUnsafe(e *CallEntry, unref bool) bool {
 	if re != nil {
 		h := re.hashNo
 		rm := false
-		//DBG("unlinkCallEntryUnsafe: re: %p re->ce: %p refCnt: %d e: %p e refCnt: %d h: %d\n", re, re.ce, re.refCnt, e, e.refCnt, h)
 		regHash.HTable[h].Lock()
 		if !regHash.HTable[h].Detached(re) {
 			regHash.HTable[h].Rm(re)
@@ -577,9 +582,11 @@ func ProcessMsg(m *sipsp.PSIPMsg, n *[2]NetInfo, f HandleEvF, evd *EventData, fl
 	if !(m.Parsed() &&
 		m.HL.PFlags.AllSet(sipsp.HdrFrom, sipsp.HdrTo,
 			sipsp.HdrCallID, sipsp.HdrCSeq)) {
-		DBG("ProcessMsg: CallErrMatch: "+
-			"message not fully parsed(%v) or missing headers (%0x)\n",
-			m.Parsed(), m.HL.PFlags)
+		if PDBGon() {
+			PDBG("ProcessMsg: CallErrMatch: "+
+				"message not fully parsed(%v) or missing headers (%0x)\n",
+				m.Parsed(), m.HL.PFlags)
+		}
 		return nil, CallErrMatch, 0, ev
 	}
 	hashNo := cstHash.Hash(m.Buf,
@@ -607,7 +614,9 @@ func ProcessMsg(m *sipsp.PSIPMsg, n *[2]NetInfo, f HandleEvF, evd *EventData, fl
 				e = newCallEntry(hashNo, 0, m, n, 0, f)
 			}
 			if e == nil {
-				DBG("ProcessMsg: newCallEntry() failed on NoMatch\n")
+				if DBGon() {
+					DBG("ProcessMsg: newCallEntry() failed on NoMatch\n")
+				}
 				cstHash.cnts.grp.Inc(cstHash.cnts.hFailNew)
 				goto errorLocked
 			}
@@ -617,7 +626,9 @@ func ProcessMsg(m *sipsp.PSIPMsg, n *[2]NetInfo, f HandleEvF, evd *EventData, fl
 			if !ok {
 				e.Unref()
 				e = nil
-				DBG("ProcessMsg: addCallEntryUnsafe() failed on NoMatch\n")
+				if DBGon() {
+					DBG("ProcessMsg: addCallEntryUnsafe() failed on NoMatch\n")
+				}
 				goto errorLocked
 			}
 			// we return the newly created call state, even if
@@ -636,7 +647,10 @@ func ProcessMsg(m *sipsp.PSIPMsg, n *[2]NetInfo, f HandleEvF, evd *EventData, fl
 			switch {
 			case n == nil:
 				if flags&CallStProcessNoAlloc == 0 /* not set */ {
-					DBG("ProcessMsg: forkCallEntry() failed & New not set\n")
+					if DBGon() {
+						DBG("ProcessMsg: forkCallEntry() failed " +
+							"& New not set\n")
+					}
 					goto errorLocked
 				}
 				e.Ref() // failed because of no alloc flag,
@@ -656,7 +670,10 @@ func ProcessMsg(m *sipsp.PSIPMsg, n *[2]NetInfo, f HandleEvF, evd *EventData, fl
 				ok, ev = addCallEntryUnsafe(n, m, dir)
 				if !ok {
 					n.Unref()
-					DBG("ProcessMsg: addCallEntryUnsafe() failed for *Match\n")
+					if DBGon() {
+						DBG("ProcessMsg: addCallEntryUnsafe() failed" +
+							" for *Match\n")
+					}
 					goto errorLocked
 				}
 			}
@@ -711,7 +728,9 @@ endLocked:
 	return e, match, dir, ev
 errorLocked:
 	cstHash.HTable[hashNo].Unlock()
-	DBG("ProcessMsg: returning CallErrMatch\n")
+	if DBGon() {
+		DBG("ProcessMsg: returning CallErrMatch\n")
+	}
 	return nil, CallErrMatch, 0, EvNone
 }
 
@@ -944,7 +963,6 @@ func newRegEntry(aorURI *sipsp.PsipURI, aor []byte, cURI *sipsp.PsipURI, c []byt
 		FreeRegEntry(nRegE)
 		return nil
 	}
-	//DBG("newRegEntry (aorURI: %q [%q], contactURI: %q [%q]) => %p (%q, %q)\n", aorURI.Flat(aor), aor, cURI.Flat(c), c, nRegE, nRegE.AORURI.Flat(nRegE.buf), nRegE.ContactURI.Flat(nRegE.buf))
 	return nRegE
 }
 

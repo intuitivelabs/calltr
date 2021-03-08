@@ -184,7 +184,6 @@ func AllocRegEntry(bufSize uint) *RegEntry {
 	} else {
 		RegEntryAllocStats.Sizes[len(RegEntryAllocStats.Sizes)-1].Inc(1)
 	}
-	DBG("AllocRegEntry(%d) => %p\n", bufSize, n)
 	runtime.KeepAlive(buf)
 	runtime.KeepAlive(slice.Data)
 	return n
@@ -194,7 +193,6 @@ func AllocRegEntry(bufSize uint) *RegEntry {
 // FreeRegEntry frees a RegEntry allocated with NewRegEntry.
 // disabled see AllocRegEntry
 func FreeRegEntry(e *RegEntry) {
-	//DBG("FreeRegEntry(%p)\n", e)
 	RegEntryAllocStats.FreeCalls.Inc(1)
 	regEntrySize := unsafe.Sizeof(*e)
 	totalSize := regEntrySize + uintptr(cap(e.buf))

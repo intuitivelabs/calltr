@@ -80,8 +80,10 @@ func (c *CallKey) SetCF(callid, fromtag []byte, reserve int) bool {
 		fromtagLen = DefaultFromTagLen
 	}
 	if callidLen+fromtagLen+reserve > maxl {
-		DBG("SetCF(l:%d, l:%d, %d) failed max len %d\n",
-			callidLen, fromtagLen, reserve, maxl)
+		if DBGon() {
+			DBG("SetCF(l:%d, l:%d, %d) failed max len %d\n",
+				callidLen, fromtagLen, reserve, maxl)
+		}
 		return false
 	}
 	copy(c.buf[:], callid)
@@ -136,15 +138,19 @@ func (c *CallKey) SetToTag(totag []byte) bool {
 	totagLen := len(totag)
 	// allow empty fromtag (consider it equivalent to fromtag="")
 	if callidLen == 0 /*|| fromtagLen == 0*/ {
-		DBG("CallKey: SetToTag (%d bytes): empty callid(%d),  fromtag: %d\n",
-			totagLen, callidLen, fromtagLen)
+		if DBGon() {
+			DBG("CallKey: SetToTag (%d bytes): empty callid(%d),  fromtag: %d\n",
+				totagLen, callidLen, fromtagLen)
+		}
 		return false
 	}
 	if callidLen+fromtagLen+totagLen > maxl {
-		DBG("CallKey: SetToTag (%d bytes): key exceeds maximum (%d/%d):"+
-			" callid(%d) or fromtag(%d)\n",
-			totagLen, maxl, callidLen+fromtagLen+totagLen,
-			callidLen, fromtagLen)
+		if DBGon() {
+			DBG("CallKey: SetToTag (%d bytes): key exceeds maximum (%d/%d):"+
+				" callid(%d) or fromtag(%d)\n",
+				totagLen, maxl, callidLen+fromtagLen+totagLen,
+				callidLen, fromtagLen)
+		}
 		return false
 	}
 	copy(c.buf[callidLen+fromtagLen:], totag)
