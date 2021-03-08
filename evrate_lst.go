@@ -9,7 +9,6 @@ package calltr
 import (
 	"fmt"
 	"io"
-	"log"
 	"net"
 	"regexp"
 	"sync"
@@ -102,7 +101,7 @@ func (lst *EvRateEntryLst) RmUnsafe(e *EvRateEntry) {
 	e.next = e
 	e.prev = e
 	if e.hashNo != lst.bucket {
-		log.Panicf("RmUnsafe called on entry from different bucket:"+
+		Log.PANIC("RmUnsafe called on entry from different bucket:"+
 			" e %p hashNo %d, lst %p bucket %d\n",
 			e, e.hashNo, lst, lst.bucket)
 	}

@@ -10,7 +10,6 @@ import (
 	"bytes"
 	"fmt"
 	"io"
-	"log"
 	"regexp"
 	"sync/atomic"
 	"time"
@@ -20,18 +19,6 @@ import (
 )
 
 var BuildTags []string
-
-func DBG(f string, a ...interface{}) {
-	fmt.Printf("DBG: calltr: "+f, a...)
-}
-
-func BUG(f string, a ...interface{}) {
-	log.Printf("BUG: calltr: "+f, a...)
-}
-
-func ERR(f string, a ...interface{}) {
-	log.Printf("ERROR: calltr: "+f, a...)
-}
 
 // MemConfig holds the memory limits for the various state that is kept.
 // A 0 value means the corresponding check is disabled.
@@ -180,15 +167,14 @@ func newCallEntry(hashNo, cseq uint32, m *sipsp.PSIPMsg, n *[2]NetInfo, dir int,
 	keySize := uint(m.PV.Callid.CallID.Len) + fromTagL + toTagL
 	if keySize > MaxTagSpace {
 		// TODO: remove log and add some stats ?
-		log.Printf("newCallEntry: callid + tags too big: %d for %s\n",
+		Log.INFO("newCallEntry: callid + tags too big: %d for %s\n",
 			keySize, m.Buf)
 		return nil
 	}
 	infoSize := infoReserveSize(m, dir)
 	e := AllocCallEntry(keySize, infoSize)
 	if e == nil {
-		log.Printf("newCallEntry: AllocEntry(%d, %d) failed\n",
-			keySize, infoSize)
+		DBG("newCallEntry: AllocEntry(%d, %d) failed\n", keySize, infoSize)
 		return nil
 	}
 	// TODO: if dir == 1 (e.g. fork on partial match from the other side)
@@ -196,7 +182,7 @@ func newCallEntry(hashNo, cseq uint32, m *sipsp.PSIPMsg, n *[2]NetInfo, dir int,
 	if !e.Key.SetCF(m.PV.Callid.CallID.Get(m.Buf), m.PV.From.Tag.Get(m.Buf),
 		int(toTagL)) {
 		// should never happen (we just reserved enough space)
-		log.Printf("BUG: newCallEntry SetCF(%q, %q, %d)"+
+		BUG("newCallEntry SetCF(%q, %q, %d)"+
 			"  cidl: %d + ftl: %d  / %d failed\n",
 			m.PV.Callid.CallID.Get(m.Buf), m.PV.From.Tag.Get(m.Buf),
 			toTagL, m.PV.Callid.CallID.Len, m.PV.From.Tag.Len,
@@ -206,7 +192,7 @@ func newCallEntry(hashNo, cseq uint32, m *sipsp.PSIPMsg, n *[2]NetInfo, dir int,
 	if m.PV.To.Tag.Len != 0 {
 		if !e.Key.SetToTag(m.PV.To.Tag.Get(m.Buf)) {
 			// should never happen (we just reserved enough space)
-			log.Printf("BUG: newCallEntry: SetToTag(%q [%d:%d/%d]) failed:"+
+			BUG("newCallEntry: SetToTag(%q [%d:%d/%d]) failed:"+
 				" keySize: %d  cid %d:%d ft %d:%d/%d (infoSize %d)\n",
 				m.PV.To.Tag.Get(m.Buf), m.PV.To.Tag.Offs, m.PV.To.Tag.Len,
 				toTagL, keySize,
@@ -282,11 +268,11 @@ func forkCallEntry(e *CallEntry, m *sipsp.PSIPMsg, dir int, match CallMatchType,
 			// enough space to update in-place
 
 			if !e.Key.SetFTag(newFromTag.Get(m.Buf), totagSpace) {
-				log.Printf("forkCallEntry: BUG: unexpected failure\n")
+				BUG("forkCallEntry: unexpected failure\n")
 				return nil
 			}
 			if !e.Key.SetToTag(newToTag.Get(m.Buf)) {
-				log.Printf("forkCallEntry: BUG: unexpected failure\n")
+				BUG("forkCallEntry: unexpected failure\n")
 				return nil
 			}
 			e.Flags |= CFReused
@@ -315,11 +301,11 @@ func forkCallEntry(e *CallEntry, m *sipsp.PSIPMsg, dir int, match CallMatchType,
 			} else {
 				// not a retr. -> update Tags
 				if !e.Key.SetFTag(newFromTag.Get(m.Buf), totagSpace) {
-					log.Printf("forkCallEntry: BUG: unexpected failure\n")
+					BUG("forkCallEntry: unexpected failure\n")
 					return nil
 				}
 				if !e.Key.SetToTag(newToTag.Get(m.Buf)) {
-					log.Printf("forkCallEntry: BUG: partial match to\n")
+					BUG("forkCallEntry: partial match to\n")
 					return nil
 				}
 				e.Flags |= CFRegReplacedHack | CFReused
@@ -374,7 +360,7 @@ func forkCallEntry(e *CallEntry, m *sipsp.PSIPMsg, dir int, match CallMatchType,
 					// update to-tag, if request or not 100
 					if m.Request() || m.FL.Status > 100 {
 						if !e.Key.SetToTag(newToTag.Get(m.Buf)) {
-							log.Printf("forkCallEntry: BUG: partial match to\n")
+							BUG("forkCallEntry: partial match to\n")
 							return nil
 						}
 					}
@@ -404,7 +390,7 @@ func forkCallEntry(e *CallEntry, m *sipsp.PSIPMsg, dir int, match CallMatchType,
 					// update to-tag, if request or not 100
 					if m.Request() || m.FL.Status > 100 {
 						if !e.Key.SetToTag(newToTag.Get(m.Buf)) {
-							log.Printf("forkCallEntry: BUG: partial match to\n")
+							BUG("forkCallEntry: partial match to\n")
 							return nil
 						}
 					}
@@ -686,7 +672,7 @@ func ProcessMsg(m *sipsp.PSIPMsg, n *[2]NetInfo, f HandleEvF, evd *EventData, fl
 				time.Duration(to)*time.Second, toF)
 		}
 	default:
-		log.Panicf("calltr.ProcessMsg: unexpected match type %d\n", match)
+		Log.PANIC("calltr.ProcessMsg: unexpected match type %d\n", match)
 	}
 endLocked:
 	// update regCache

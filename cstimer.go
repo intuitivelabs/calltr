@@ -7,7 +7,6 @@
 package calltr
 
 import (
-	"log"
 	"runtime"
 	"sync/atomic"
 	"time"
@@ -90,16 +89,14 @@ func (t *TimerInfo) UpdateTimeout(after time.Duration, f TimerUpdateF) bool {
 			t.done = 0
 			t.Expire = time.Now().Add(after)
 			if t.Handle.Reset(after) {
-				log.Printf("WARNING: UpdateTimeout:"+
-					" reset active timer  failed for timer entry %p: %v\n",
-					t, *t)
+				WARN("UpdateTimeout: reset active timer  failed"+
+					" for timer entry %p: %v\n", t, *t)
 			}
 			return true
 		}
 		// stop failed, means the timer is running now => update failed
-		log.Printf("WARNING: UpdateTimeout:"+
-			"update timer  failed for timer entry %p: %v with %d ns\n",
-			t, *t, after)
+		WARN("UpdateTimeout: update timer  failed"+
+			" for timer entry %p: %v with %d ns\n", t, *t, after)
 		return false
 	}
 	t.Expire = newExpire
@@ -113,7 +110,7 @@ func (t *TimerInfo) Start(f func()) bool {
 	// sanity checks
 	if atomic.LoadPointer(handleAddr) != nil ||
 		atomic.LoadInt32(&t.done) != 0 {
-		log.Panicf("TimerInfo.Start() called with un-init timer %p : %v\n",
+		Log.PANIC("TimerInfo.Start() called with un-init timer %p : %v\n",
 			t, *t)
 		return false
 	}
@@ -195,7 +192,7 @@ func csTimerStartUnsafe(cs *CallEntry) bool {
 	// sanity checks
 	if atomic.LoadPointer(handleAddr) != nil ||
 		atomic.LoadInt32(&cs.Timer.done) != 0 {
-		log.Panicf("csTimerStart called with un-init timer %p : %v\n",
+		Log.PANIC("csTimerStart called with un-init timer %p : %v\n",
 			cs, *cs)
 		return false
 	}
@@ -262,7 +259,7 @@ func csTimerUpdateTimeoutUnsafe(cs *CallEntry, after time.Duration,
 		// extra-debugging for REGISTER
 		/*
 			if cs.Method == sipsp.MRegister && cs.crtEv != EvRegDel && cs.Timer.Expire.Sub(time.Now()) > 59*time.Second && cs.Timer.Expire.Sub(newExpire) > 4*time.Second {
-				log.Printf("DBG: TIMER: REGISTER:"+
+				DBG("TIMER: REGISTER:"+
 					" state %q <- %q  msg trace: %q flags %q crtEv %q"+
 					" lastEv %q evFlags %q:"+
 					"callid: %q timeout force reduced from %v to %v\n",
@@ -280,16 +277,14 @@ func csTimerUpdateTimeoutUnsafe(cs *CallEntry, after time.Duration,
 			cs.Timer.done = 0
 			cs.Timer.Expire = time.Now().Add(after)
 			if cs.Timer.Handle.Reset(after) {
-				log.Printf("WARNING: csTimerUpdateTimeoutUnsafe:"+
-					" reset active timer  failed for call entry %p: %v\n",
-					cs, *cs)
+				WARN("csTimerUpdateTimeoutUnsafe: reset active timer failed"+
+					" for call entry %p: %v\n", cs, *cs)
 			}
 			return true
 		}
 		// stop failed, means the timer is running now => update failed
-		log.Printf("WARNING: csTimerUpdateTimeoutUnsafe:"+
-			"update timer  failed for call entry %p: %v with %d ns\n",
-			cs, *cs, after)
+		WARN("WARNING: csTimerUpdateTimeoutUnsafe: update timer  failed"+
+			" for call entry %p: %v with %d ns\n", cs, *cs, after)
 		return false
 	}
 	cs.Timer.Expire = newExpire

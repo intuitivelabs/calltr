@@ -551,10 +551,8 @@ func (ci *CallInfo) AddFromMsg(m *sipsp.PSIPMsg, dir int) int {
 		if src[i] == nil {
 			continue
 		}
-		//fmt.Printf("SetFromMsg: addPField src[%d - %s]: %v, len(m.Buf)= %d\n", i, CallAttrIdx(i), *src[i], len(m.Buf))
 		n := addPField(src[i], m.Buf, &ci.Attrs[i], &ci.buf, &ci.used,
 			int(AttrSpace[i].Max))
-		//fmt.Printf("SetFromMsg: addPField dst[%d]: %v, len(ci.buf)= %d (%d)\n", i, ci.Attrs[i], len(ci.buf), ci.used)
 		if n > 0 {
 			s += n
 		}
@@ -570,7 +568,6 @@ func (ci *CallInfo) AddFromCi(si *CallInfo) int {
 		if si.Attrs[i].Empty() {
 			continue
 		}
-		//fmt.Printf("SetFromCi: addPField si.Attrs[%d - %s]: %v, len(si.buf)= %d (%d)\n", i, CallAttrIdx(i), si.Attrs[i], len(si.buf), si.used)
 		n := ci.AddAttrField(CallAttrIdx(i), &si.Attrs[i], si.buf)
 		if n > 0 {
 			ret += n

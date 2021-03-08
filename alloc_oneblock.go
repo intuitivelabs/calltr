@@ -11,7 +11,6 @@
 package calltr
 
 import (
-	"log"
 	"reflect"
 	"runtime"
 	"sync/atomic"
@@ -108,12 +107,12 @@ func FreeCallEntry(e *CallEntry) {
 	if len(e.Key.buf) != 0 &&
 		uintptr(unsafe.Pointer(e))+callEntrySize !=
 			uintptr(unsafe.Pointer(&e.Key.buf[0])) {
-		log.Panicf("FreeCallEntry called with call entry not allocated"+
+		Log.PANIC("FreeCallEntry called with call entry not allocated"+
 			" with NewCallEntry: %p (sz: %x), buf %p\n",
 			e, callEntrySize, &e.Key.buf[0])
 	}
 	if v := atomic.LoadInt32(&e.refCnt); v != 0 {
-		log.Panicf("FreeCallEntry called for a referenced entry: %p ref: %d\n",
+		Log.PANIC("FreeCallEntry called for a referenced entry: %p ref: %d\n",
 			e, e.refCnt)
 	}
 	*e = CallEntry{}          // DBG: zero it
@@ -203,12 +202,12 @@ func FreeRegEntry(e *RegEntry) {
 	if len(e.buf) != 0 &&
 		uintptr(unsafe.Pointer(e))+regEntrySize !=
 			uintptr(unsafe.Pointer(&e.buf[0])) {
-		log.Panicf("FreeRegEntry called with reg entry not allocated"+
+		Log.PANIC("FreeRegEntry called with reg entry not allocated"+
 			" with NewRegEntry: %p (sz: %x), buf %p\n",
 			e, regEntrySize, &e.buf[0])
 	}
 	if v := atomic.LoadInt32(&e.refCnt); v != 0 {
-		log.Panicf("FreeRegEntry called for a referenced entry: %p ref: %d\n",
+		Log.PANIC("FreeRegEntry called for a referenced entry: %p ref: %d\n",
 			e, e.refCnt)
 	}
 	*e = RegEntry{}           // DBG: zero it to force crashes on re-use w/o alloc

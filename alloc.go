@@ -11,7 +11,6 @@
 package calltr
 
 import (
-	"log"
 	"runtime"
 	"sync/atomic"
 	"unsafe"
@@ -97,13 +96,13 @@ func FreeCallEntry(e *CallEntry) {
 	totalBufSize := cap(e.Key.buf)
 	// sanity checks
 	if totalBufSize != (len(e.Key.buf) + len(e.Info.buf)) {
-		log.Panicf("FreeCallEntry buffer size mismatch: %d != %d + %d "+
+		Log.PANIC("FreeCallEntry buffer size mismatch: %d != %d + %d "+
 			" for CallEntry: %p , buf %p\n",
 			totalBufSize, len(e.Key.buf), len(e.Info.buf),
 			e, &e.Key.buf[0])
 	}
 	if v := atomic.LoadInt32(&e.refCnt); v != 0 {
-		log.Panicf("FreeCallEntry called for a referenced entry: %p ref: %d\n",
+		Log.PANIC("FreeCallEntry called for a referenced entry: %p ref: %d\n",
 			e, e.refCnt)
 	}
 	e.Key.buf = nil
@@ -176,7 +175,7 @@ func FreeRegEntry(e *RegEntry) {
 	regEntrySize := unsafe.Sizeof(*e)
 	totalSize := regEntrySize + uintptr(cap(e.buf))
 	if v := atomic.LoadInt32(&e.refCnt); v != 0 {
-		log.Panicf("FreeRegEntry called for a referenced entry: %p ref: %d\n",
+		Log.PANIC("FreeRegEntry called for a referenced entry: %p ref: %d\n",
 			e, e.refCnt)
 	}
 	e.buf = nil

@@ -7,7 +7,6 @@
 package calltr
 
 import (
-	"log"
 	"runtime"
 	"sync"
 	//sync "github.com/sasha-s/go-deadlock"
@@ -19,7 +18,7 @@ import (
 	"github.com/intuitivelabs/sipsp"
 )
 
-/* TODO:
+/* TODO: update txt
 
    Flow: (linked to call-entry)
     on new 200 for a call-entry:
@@ -154,14 +153,12 @@ func (r *RegEntry) Unref() bool {
 
 func (r *RegEntry) aorMatchURI(uri *sipsp.PsipURI, buf []byte) bool {
 	ret := sipsp.URICmpShort(&r.AORURI, r.buf, uri, buf, sipsp.URICmpAll)
-	//DBG("aorMatchURI: %q with %p: %q (%q) => %v\n", uri.Flat(buf), r, r.AORURI.Flat(r.buf), r.AOR.Get(r.buf), ret)
 	return ret
 }
 
 func (r *RegEntry) contactMatchURI(uri *sipsp.PsipURI, buf []byte,
 	flags sipsp.URICmpFlags) bool {
 	ret := sipsp.URICmpShort(&r.ContactURI, r.buf, uri, buf, flags)
-	//DBG("contactMatchURI: %q with %p: %q (%q) => %v\n", uri.Flat(buf), r, r.ContactURI.Flat(r.buf), r.Contact.Get(r.buf), ret)
 	return ret
 }
 
@@ -169,14 +166,12 @@ func (r *RegEntry) contactMatchURI(uri *sipsp.PsipURI, buf []byte,
 func (r *RegEntry) SetAOR(aorURI *sipsp.PsipURI, buf []byte) bool {
 	var ok bool
 	aor := aorURI.Short()
-	//DBG("SetAOR: %q -> aorURI.Short() => %q\n", aorURI.Flat(buf), aor.Get(buf))
 	if r.AOR, ok = r.addPField(aor, buf); !ok {
 		ERR("SetAOR: addPField failure\n")
 		return false
 	}
 	r.AORURI = *aorURI
 	r.AORURI.Truncate()
-	//DBG("SetAOR: %q -> AORURI.Truncate() => %q\n", aorURI.Flat(buf), r.AORURI.Flat(buf))
 	if !r.AORURI.AdjustOffs(r.AOR) {
 		ERR("SetAOR: AdjustOffs failure\n")
 		// undo changes
@@ -185,8 +180,6 @@ func (r *RegEntry) SetAOR(aorURI *sipsp.PsipURI, buf []byte) bool {
 		r.AORURI.Reset()
 		return false
 	}
-	//DBG("SetAOR: -> AORURI.AdjustOffs() => %q [%q]\n", r.AORURI.Flat(r.buf), r.AOR.Get(r.buf))
-	// DBG("SetAOR: -> AORURI.AdjustOffs() => %q:%q:%q@%q:%q;%q?%q\n", r.AORURI.Scheme.Get(r.buf), r.AORURI.User.Get(r.buf), r.AORURI.Pass.Get(r.buf), r.AORURI.Host.Get(r.buf), r.AORURI.Port.Get(r.buf), r.AORURI.Params.Get(r.buf), r.AORURI.Headers.Get(r.buf))
 
 	return true
 }
@@ -335,17 +328,14 @@ func (lst *RegEntryLst) bugLockCheck(r *RegEntry, name string) bool {
 
 func (lst *RegEntryLst) Insert(r *RegEntry) {
 	lst.bugChecks(r, "Insert:", true)
-	//DBG("RegEntryLst.Insert(%p, %p) before: on hash %d %d, head = %p, 1st = %p, lst = %p , next = %p, prev = %p\n", lst, r, lst.bucket, r.hashNo, &lst.head, lst.head.next, lst.head.prev, r.next, r.prev)
 	r.prev = &lst.head
 	r.next = lst.head.next
 	r.next.prev = r
 	lst.head.next = r
-	//DBG("RegEntryLst.Insert(%p, %p) after: on hash %d %d, head = %p, 1st = %p, lst = %p , next = %p, prev = %p\n", lst, r, lst.bucket, r.hashNo, &lst.head, lst.head.next, lst.head.prev, r.next, r.prev)
 }
 
 func (lst *RegEntryLst) Rm(r *RegEntry) {
 	lst.bugChecks(r, "Rm:", false)
-	//DBG("RegEntryLst.Rm(%p, %p) on hash %d %d, head = %p, 1st = %p, lst = %p , next = %p, prev = %p\n", lst, r, lst.bucket, r.hashNo, &lst.head, lst.head.next, lst.head.prev, r.next, r.prev)
 	r.prev.next = r.next
 	r.next.prev = r.prev
 	// extra safety: mark r as detached
@@ -354,7 +344,6 @@ func (lst *RegEntryLst) Rm(r *RegEntry) {
 }
 
 func (lst *RegEntryLst) Detached(r *RegEntry) bool {
-	//DBG("RegEntryLst.Detached(%p, %p) on hash %d %d, head = %p, 1st = %p, lst = %p , next = %p, prev = %p => %v\n", lst, r, lst.bucket, r.hashNo, &lst.head, lst.head.next, lst.head.prev, r.next, r.prev, r == r.next)
 	return r == r.next
 }
 
@@ -408,7 +397,6 @@ func (lst *RegEntryLst) FindBindingUnsafe(aor *sipsp.PsipURI, abuf []byte,
 	loop := false
 	for e := lst.head.next; e != &lst.head; e = e.next {
 		if !loop {
-			//DBG("FindBindingUnsafe: iter %d/%d, e = %p, next = %p, prev = %p, head = %p, 1st= %p, lst = %p, h=%d, crt bucket =%d\n", i, lst.entries, e, e.next, e.prev, &lst.head, lst.head.next, lst.head.prev, e.hashNo, lst.bucket)
 			if lst.bugChecks(e, "FindBindingUnsafe", false) {
 				BUG("RegEntryLst(%p, %p, %q, %p, %q): loop found e=%p next=%p prev=%p at pos %d for hash %d\n", lst, aor, abuf, contact, cbuf, e, e.next, e.prev, i, e.hashNo)
 				loop = true
@@ -484,7 +472,7 @@ func (h *RegEntryHash) Destroy() {
 					if !v.TimerTryStop() {
 						// timer is running, retry later
 						retry = true
-						log.Printf("Reg Entry Hash Destroy:"+
+						DBG("Reg Entry Hash Destroy:"+
 							" timer running for %p: %v\n",
 							v, *v)
 						continue
@@ -513,9 +501,8 @@ func (h *RegEntryHash) Destroy() {
 				}
 				if !v.Unref() {
 					// still referenced, bug?
-					log.Printf("Reg Entry Hash Destroy:"+
-						" entry still ref'd %p; %v\n",
-						v, *v)
+					Log.INFO("Reg Entry Hash Destroy: entry still ref'd"+
+						" %p; %v\n", v, *v)
 				}
 			}
 			h.HTable[i].Unlock()

@@ -10,7 +10,6 @@
 package calltr
 
 import (
-	"log"
 	"runtime"
 	"sync/atomic"
 	"unsafe"
@@ -46,7 +45,7 @@ func FreeEvRateEntry(e *EvRateEntry) {
 	EvRateEntryAllocStats.FreeCalls.Inc(1)
 	entrySize := unsafe.Sizeof(*e)
 	if v := atomic.LoadInt32(&e.refCnt); v != 0 {
-		log.Panicf("EvRateEntry called for a referenced entry"+
+		Log.PANIC("EvRateEntry called for a referenced entry"+
 			"%p hashNo %x refCnt %x key %s:%s\n",
 			e, e.hashNo, e.refCnt,
 			e.Ev, e.Src.IP())

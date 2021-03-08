@@ -8,7 +8,6 @@ package calltr
 
 import (
 	"bytes"
-	"log"
 	"sync"
 	//sync "github.com/sasha-s/go-deadlock"
 
@@ -102,7 +101,7 @@ func (h *CallEntryHash) Destroy() {
 			for v, nxt := s, s.next; v != &h.HTable[i].head; v, nxt = nxt, nxt.next {
 				if !csTimerTryStopUnsafe(v) {
 					// timer is running, retry later (must unlock first)
-					log.Printf("Hash Destroy: Timer running  for %p: %v\n",
+					Log.INFO("Hash Destroy: Timer running  for %p: %v\n",
 						v, *v)
 					retry = true
 					continue
@@ -110,7 +109,7 @@ func (h *CallEntryHash) Destroy() {
 				h.HTable[i].Rm(v)
 				if !v.Unref() {
 					// still referenced
-					log.Printf("Hash Destroy: entry still referenced %p: %v\n",
+					Log.INFO("Hash Destroy: entry still referenced %p: %v\n",
 						v, *v)
 					//FreeCallEntry(v)
 				}
