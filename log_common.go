@@ -19,6 +19,11 @@ var Log slog.Log = slog.New(slog.LERR, slog.LbackTraceL|slog.LlocInfoL,
 // Plog is the log used when parsing and processing messages
 var Plog slog.Log = slog.New(slog.LCRIT, slog.LOptNone, slog.LStdErr)
 
+// WARNon() is a shorthand for checking if logging at LWARN level is enabled
+func WARNon() bool {
+	return Log.WARNon()
+}
+
 // WARN is a shorthand for logging a warning message.
 func WARN(f string, a ...interface{}) {
 	Log.LLog(slog.LWARN, 1, "WARNING: calltr: ", f, a...)

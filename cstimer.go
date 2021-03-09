@@ -283,8 +283,15 @@ func csTimerUpdateTimeoutUnsafe(cs *CallEntry, after time.Duration,
 			return true
 		}
 		// stop failed, means the timer is running now => update failed
-		WARN("WARNING: csTimerUpdateTimeoutUnsafe: update timer  failed"+
-			" for call entry %p: %v with %d ns\n", cs, *cs, after)
+		if WARNon() {
+			var buf [1024]byte
+			n := runtime.Stack(buf[:], false)
+			WARN("csTimerUpdateTimeoutUnsafe: update timer  failed: backtrace:\n"+
+				"%s\n", buf[:n])
+			WARN("csTimerUpdateTimeoutUnsafe: update timer  failed"+
+				" for call entry %p: %v with %d ns\n",
+				buf[:n], cs, *cs, after)
+		}
 		return false
 	}
 	cs.Timer.Expire = newExpire
