@@ -49,7 +49,8 @@ func AllocCallEntry(keySize, infoSize uint) *CallEntry {
 	totalBufSize = ((totalBufSize-1)/AllocRoundTo + 1) * AllocRoundTo //round up
 	totalSize := uint(totalBufSize + callEntrySize)
 
-	maxMem := GetCfg().Mem.MaxCallEntriesMem
+	cfg := GetCfg()
+	maxMem := cfg.Mem.MaxCallEntriesMem
 	if CallEntryAllocStats.TotalSize.Inc(totalSize) > maxMem && maxMem > 0 {
 		// limit exceeded
 		CallEntryAllocStats.TotalSize.Dec(totalSize)
@@ -98,18 +99,20 @@ func AllocCallEntry(keySize, infoSize uint) *CallEntry {
 			CallEntryAllocStats.TotalSize.Dec(totalSize)
 			return nil
 		}
-		// DBG: extra debugging: when about to be garbage collected, check if
-		// the entry was marked as free from FreeCallEntry(), otherwise report
-		// a BUG.
-		runtime.SetFinalizer(n, func(c *CallEntry) {
-			if c.hashNo != (^uint32(0) - 1) {
-				BUG("Finalizer: non-freed CallEntry about to be "+
-					"garbage collected %p hashNo %x refCnt %x %p key %q:%q:%q\n",
-					c, c.hashNo, c.refCnt, c.regBinding,
-					c.Key.GetFromTag, c.Key.GetToTag, c.Key.GetCallID())
-			}
-		},
-		)
+		if cfg.Dbg&DbgFAllocs != 0 {
+			// DBG: extra debugging: when about to be garbage collected,
+			// check if the entry was marked as free from FreeCallEntry(),
+			// otherwise report a BUG.
+			runtime.SetFinalizer(n, func(c *CallEntry) {
+				if c.hashNo != (^uint32(0) - 1) {
+					BUG("Finalizer: non-freed CallEntry about to be "+
+						"garbage collected %p hashNo %x refCnt %x %p key %q:%q:%q\n",
+						c, c.hashNo, c.refCnt, c.regBinding,
+						c.Key.GetFromTag, c.Key.GetToTag, c.Key.GetCallID())
+				}
+			},
+			)
+		}
 	}
 	n.hashNo = ^uint32(0) // DBG: set invalid hash
 	n.Key.Init(buf[:keySize])
@@ -167,7 +170,8 @@ func AllocRegEntry(bufSize uint) *RegEntry {
 	regESz := unsafe.Sizeof(*n)
 	totalSize := uint(totalBufSize) + uint(regESz)
 
-	maxMem := GetCfg().Mem.MaxRegEntriesMem
+	cfg := GetCfg()
+	maxMem := cfg.Mem.MaxRegEntriesMem
 	if RegEntryAllocStats.TotalSize.Inc(totalSize) > maxMem && maxMem > 0 {
 		RegEntryAllocStats.TotalSize.Dec(totalSize)
 		RegEntryAllocStats.Failures.Inc(1)
@@ -215,18 +219,21 @@ func AllocRegEntry(bufSize uint) *RegEntry {
 			RegEntryAllocStats.TotalSize.Dec(totalSize)
 			return nil
 		}
-		// extra debugging: when about to be garbage collected, check if
-		// the entry was marked as free from FreeCallEntry(), otherwise report
-		// a BUG.
-		runtime.SetFinalizer(n, func(r *RegEntry) {
-			if r.hashNo != (^uint32(0) - 1) {
-				BUG("Finalizer: non-freed RegEntry about to be "+
-					"garbage collected %p hashNo %x refCnt %x ce %p key %q:%q\n",
-					r, r.hashNo, r.refCnt, r.ce,
-					r.AOR.Get(r.buf), r.Contact.Get(r.buf))
-			}
-		},
-		)
+		if cfg.Dbg&DbgFAllocs != 0 {
+			// extra debugging: when about to be garbage collected, check if
+			// the entry was marked as free from FreeCallEntry(),
+			// otherwise report a BUG.
+			runtime.SetFinalizer(n, func(r *RegEntry) {
+				if r.hashNo != (^uint32(0) - 1) {
+					BUG("Finalizer: non-freed RegEntry about to be "+
+						"garbage collected %p hashNo %x refCnt %x "+
+						"ce %p key %q:%q\n",
+						r, r.hashNo, r.refCnt, r.ce,
+						r.AOR.Get(r.buf), r.Contact.Get(r.buf))
+				}
+			},
+			)
+		}
 	}
 	*n = RegEntry{}       // DBG: zero it
 	n.hashNo = ^uint32(0) // DBG: set invalid hash

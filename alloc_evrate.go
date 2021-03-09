@@ -22,18 +22,21 @@ func AllocEvRateEntry() *EvRateEntry {
 	EvRateEntryAllocStats.NewCalls.Inc(1)
 	e.Reset()
 	n := &e
-	// extra debugging: when about to be garbage collected, check if
-	// the entry was marked as free from FreeEvRateEntry(), otherwise report
-	// a BUG.
-	runtime.SetFinalizer(n, func(e *EvRateEntry) {
-		if e.hashNo != (^uint32(0) - 1) {
-			BUG("Finalizer: non-freed EvRateEntry about to be "+
-				"garbage collected %p hashNo %x refCnt %x key %s:%s\n",
-				e, e.hashNo, e.refCnt,
-				e.Ev, e.Src.IP())
-		}
-	},
-	)
+	cfg := GetCfg()
+	if cfg.Dbg&DbgFAllocs != 0 {
+		// extra debugging: when about to be garbage collected, check if
+		// the entry was marked as free from FreeEvRateEntry(),
+		// otherwise report a BUG.
+		runtime.SetFinalizer(n, func(e *EvRateEntry) {
+			if e.hashNo != (^uint32(0) - 1) {
+				BUG("Finalizer: non-freed EvRateEntry about to be "+
+					"garbage collected %p hashNo %x refCnt %x key %s:%s\n",
+					e, e.hashNo, e.refCnt,
+					e.Ev, e.Src.IP())
+			}
+		},
+		)
+	}
 	eSz := unsafe.Sizeof(*n)
 	EvRateEntryAllocStats.TotalSize.Inc(uint(eSz))
 	return n

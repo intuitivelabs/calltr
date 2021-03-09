@@ -41,7 +41,8 @@ func AllocCallEntry(keySize, infoSize uint) *CallEntry {
 	totalSize := callEntrySize + keySize + infoSize
 	totalSize = ((totalSize-1)/AllocRoundTo + 1) * AllocRoundTo // round up
 
-	maxMem := GetCfg().Mem.MaxCallEntriesMem
+	cfg := GetCfg()
+	maxMem := cfg.Mem.MaxCallEntriesMem
 	if CallEntryAllocStats.TotalSize.Inc(uint(totalSize)) > maxMem &&
 		maxMem > 0 {
 		// limit exceeded
@@ -68,18 +69,20 @@ func AllocCallEntry(keySize, infoSize uint) *CallEntry {
 	}
 	p := unsafe.Pointer(&buf[0])
 	n := (*CallEntry)(p)
-	// extra debugging: when about to be garbage collected, check if
-	// the entry was marked as free from FreeCallEntry(), otherwise report
-	// a BUG.
-	runtime.SetFinalizer(n, func(c *CallEntry) {
-		if c.hashNo != (^uint32(0) - 1) {
-			BUG("Finalizer: non-freed CallEntry about to be "+
-				"garbage collected %p hashNo %x refCnt %x %p key %q:%q:%q\n",
-				c, c.hashNo, c.refCnt, c.regBinding,
-				c.Key.GetFromTag, c.Key.GetToTag, c.Key.GetCallID())
-		}
-	},
-	)
+	if cfg.Dbg&DbgFAllocs != 0 {
+		// extra debugging: when about to be garbage collected, check if
+		// the entry was marked as free from FreeCallEntry(), otherwise report
+		// a BUG.
+		runtime.SetFinalizer(n, func(c *CallEntry) {
+			if c.hashNo != (^uint32(0) - 1) {
+				BUG("Finalizer: non-freed CallEntry about to be "+
+					"garbage collected %p hashNo %x refCnt %x %p key %q:%q:%q\n",
+					c, c.hashNo, c.refCnt, c.regBinding,
+					c.Key.GetFromTag, c.Key.GetToTag, c.Key.GetCallID())
+			}
+		},
+		)
+	}
 	*n = e
 	n.hashNo = ^uint32(0) // DBG: set invalid hash
 	n.Key.Init(buf[callEntrySize:(callEntrySize + keySize)])
@@ -139,7 +142,8 @@ func AllocRegEntry(bufSize uint) *RegEntry {
 	totalSize := regEntrySize + bufSize
 	totalSize = ((totalSize-1)/AllocRoundTo + 1) * AllocRoundTo // round up
 
-	maxMem := GetCfg().Mem.MaxRegEntriesMem
+	cfg := GetCfg()
+	maxMem := cfg.Mem.MaxRegEntriesMem
 	if RegEntryAllocStats.TotalSize.Inc(uint(totalSize)) > maxMem &&
 		maxMem > 0 {
 		RegEntryAllocStats.TotalSize.Dec(uint(totalSize))
@@ -166,9 +170,11 @@ func AllocRegEntry(bufSize uint) *RegEntry {
 	slice := (*reflect.SliceHeader)(unsafe.Pointer(&buf))
 	n := (*RegEntry)(unsafe.Pointer(slice.Data))
 	//n := (*RegEntry)(unsafe.Pointer(&buf[0]))
+	//if cfg.Dbg&DbgFAllocs != 0 {
 	//runtime.SetFinalizer(n, func(p *RegEntry) { DBG("Finalizer RegEntry(%p)\n", p) })
 	//runtime.SetFinalizer(&buf[0], func(p unsafe.Pointer) { DBG("Finalizer &buf[0](%p)\n", p) })
 	//runtime.SetFinalizer(&buf, func(p *[]byte) { DBG("Finalizer buf[](%p)\n", p) })
+	//}
 	e.hashNo = ^uint32(0) // DBG: set invalid hash
 	e.pos = 0
 	//n := &e // quick HACK

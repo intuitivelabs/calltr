@@ -33,6 +33,7 @@ type Config struct {
 	RegDelta          uint32 // registration expire delta in s, added to expire timeouts
 	ContactIgnorePort bool   // ignore port when comparing contacts (but not in AORs)
 	Mem               MemConfig
+	Dbg               DbgFlags
 }
 
 var crtCfg *Config = &DefaultConfig
@@ -46,6 +47,7 @@ var DefaultConfig = Config{
 		MaxRegEntries:     0,
 		MaxRegEntriesMem:  0,
 	},
+	Dbg: DbgFAllocs,
 }
 
 var cstHash CallEntryHash

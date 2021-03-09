@@ -37,18 +37,21 @@ func AllocEvRateEntry() *EvRateEntry {
 			EvRateEntryAllocStats.Failures.Inc(1)
 			return nil
 		}
-		// extra debugging: when about to be garbage collected, check if
-		// the entry was marked as free from FreeCallEntry(), otherwise report
-		// a BUG.
-		runtime.SetFinalizer(n, func(e *EvRateEntry) {
-			if e.hashNo != (^uint32(0) - 1) {
-				BUG("Finalizer: non-freed EvRateEntry about to be "+
-					"garbage collected %p hashNo %x refCnt %x key %q:%q\n",
-					e, e.hashNo, e.refCnt,
-					e.Ev, e.Src.IP())
-			}
-		},
-		)
+		cfg := GetCfg()
+		if cfg.Dbg&DbgFAllocs != 0 {
+			// extra debugging: when about to be garbage collected, check if
+			// the entry was marked as free from FreeCallEntry(),
+			// otherwise report a BUG.
+			runtime.SetFinalizer(n, func(e *EvRateEntry) {
+				if e.hashNo != (^uint32(0) - 1) {
+					BUG("Finalizer: non-freed EvRateEntry about to be "+
+						"garbage collected %p hashNo %x refCnt %x key %q:%q\n",
+						e, e.hashNo, e.refCnt,
+						e.Ev, e.Src.IP())
+				}
+			},
+			)
+		}
 	} else {
 		EvRateEntryAllocStats.PoolHits[pNo].Inc(1)
 	}
