@@ -133,10 +133,10 @@ func (r *RegEntry) Unref() bool {
 			/*
 				// try to recover
 				// lock & remove call entry link
-				locked := lockCallEntry(r.ce)
+				locked := LockCallEntry(r.ce)
 				r.ce.regBinding = nil
 				if locked {
-					unlockCallEntry(r.ce)
+					UnlockCallEntry(r.ce)
 				}
 				r.ce.Unref()
 			*/

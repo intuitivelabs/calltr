@@ -80,13 +80,13 @@ func GetCfg() *Config {
 	return (*Config)(p)
 }
 
-// Locks a CallEntry.
+// LockCallEntry try to lock a CallEntry.
 // For now it locks the corresp. hash bucket list in the global cstHash.
 // Returns true if successful, false if not (entry not linked in any list).
 // Warning: since it locks cstHash[e.hashNo] there is a deadlock
 //          if more then one entry with the same hash are locked from the
 //          same thread.
-func lockCallEntry(e *CallEntry) bool {
+func LockCallEntry(e *CallEntry) bool {
 
 	h := e.hashNo
 	if h < uint32(len(cstHash.HTable)) && (e.next != e) {
@@ -101,10 +101,11 @@ func lockCallEntry(e *CallEntry) bool {
 	return false
 }
 
-// Unlocks a CallEntry.
+// UnlockCallEntry unlocks a CallEntry, previously locked with LockCallEntry.
+// WARNING: use only if LockCallEntry() returned true.
 // Returns false if it fails (invalid CallEntry hashNo).
-// See also lockCallEntry()
-func unlockCallEntry(e *CallEntry) bool {
+// See also LockCallEntry()
+func UnlockCallEntry(e *CallEntry) bool {
 	h := e.hashNo
 	if h < uint32(len(cstHash.HTable)) {
 		cstHash.HTable[h].Unlock()
