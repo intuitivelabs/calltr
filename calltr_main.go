@@ -155,7 +155,8 @@ func unlockRegEntry(r *RegEntry) bool {
 // a request coming from the callee should never happen: even if we see
 // first something like that we wouldn't be able to know who initiated the
 // the dialog and hence the dir).
-func newCallEntry(hashNo, cseq uint32, m *sipsp.PSIPMsg, n *[2]NetInfo, dir int, evH HandleEvF) *CallEntry {
+func newCallEntry(hashNo, cseq uint32, m *sipsp.PSIPMsg,
+	n [2]NetInfo, dir int, evH HandleEvF) *CallEntry {
 	toTagL := uint(m.PV.To.Tag.Len)
 	if toTagL == 0 { // TODO: < DefaultToTagLen (?)
 		toTagL = DefaultToTagLen
@@ -217,9 +218,7 @@ func newCallEntry(hashNo, cseq uint32, m *sipsp.PSIPMsg, n *[2]NetInfo, dir int,
 	e.Method = m.Method()
 	e.evHandler = evH
 	e.CreatedTS = time.Now()
-	if n != nil {
-		e.EndPoint = *n // FIXME
-	}
+	e.EndPoint = n
 	return e
 error:
 	if e != nil {
@@ -439,7 +438,7 @@ func forkCallEntry(e *CallEntry, m *sipsp.PSIPMsg, dir int, match CallMatchType,
 	if flags&CallStProcessNoAlloc != 0 {
 		return nil // alloc/fork not allowed, exit
 	}
-	n := newCallEntry(e.hashNo, 0, m, &e.EndPoint, dir, e.evHandler)
+	n := newCallEntry(e.hashNo, 0, m, e.EndPoint, dir, e.evHandler)
 	if n != nil {
 		// TODO:  make sure all the relevant entry data is cloned
 		if dir == 0 {
@@ -579,7 +578,8 @@ func unlinkCallEntryUnsafe(e *CallEntry, unref bool) bool {
 // calle, match, dir = ProcessMsg(sipmsg, CallStProcessUpdate CallStNoAlloc)
 // calle.Unref()
 //
-func ProcessMsg(m *sipsp.PSIPMsg, n *[2]NetInfo, f HandleEvF, evd *EventData, flags CallStProcessFlags) (*CallEntry, CallMatchType, int, EventType) {
+func ProcessMsg(m *sipsp.PSIPMsg, ni [2]NetInfo, f HandleEvF, evd *EventData,
+	flags CallStProcessFlags) (*CallEntry, CallMatchType, int, EventType) {
 	var to TimeoutS
 	var toF TimerUpdateF
 	ev := EvNone
@@ -611,11 +611,11 @@ func ProcessMsg(m *sipsp.PSIPMsg, n *[2]NetInfo, f HandleEvF, evd *EventData, fl
 			if !m.FL.Request() {
 				//  if entry is created from a reply, invert ip addresses
 				var endpoints [2]NetInfo
-				endpoints[0], endpoints[1] = n[1], n[0]
-				n = &endpoints
-				e = newCallEntry(hashNo, 0, m, n, 0, f)
+				endpoints[0], endpoints[1] = ni[1], ni[0]
+				ni = endpoints
+				e = newCallEntry(hashNo, 0, m, ni, 0, f)
 			} else {
-				e = newCallEntry(hashNo, 0, m, n, 0, f)
+				e = newCallEntry(hashNo, 0, m, ni, 0, f)
 			}
 			if e == nil {
 				if DBGon() {
@@ -738,7 +738,7 @@ errorLocked:
 	return nil, CallErrMatch, 0, EvNone
 }
 
-func Track(m *sipsp.PSIPMsg, n *[2]NetInfo, f HandleEvF) bool {
+func Track(m *sipsp.PSIPMsg, n [2]NetInfo, f HandleEvF) bool {
 	var evd *EventData
 	if f != nil { // TODO: obsolete
 		// TODO: most likely on the heap (due to f(evd)) => sync.pool
