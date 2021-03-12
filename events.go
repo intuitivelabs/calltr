@@ -129,6 +129,37 @@ func (f *EventFlags) String() string {
 	return s
 }
 
+// HandleEvF is a function callback that should handle a new CallEvent.
+// It should copy all the needed information from the passed CallEvent
+// structure, since the data _will_ be overwritten after the call
+// (so all the []byte slices _must_ be copied if needed).
+// NOTE: HandleEvF is obsoleted by HandleNewCEv.
+type HandleEvF func(callev *EventData)
+
+// HandleNewCev is a function callback that is called every time a new
+// call based event appears.
+// The parameters are the event type, the CallEntry that
+// triggered the event, the souce and destination (IP, port, protocol).
+// Note that the CallEntry must be treated as read-only
+// and no reference to it should be kept after the callback returns.
+// If a reference must be kept then the callback should call e.Ref()
+// and when the reference is no longer needed e.Unref().
+// Before reading anything from the CallEntry the entry _must_ be locked
+// (calltr.LockCallEntry(e) & calltr.UnlockCallEntry(e)).
+// Only one CallEntry should be locked at any time (risk of deadlocks).
+type HandleNewCev func(ev EventType, e *CallEntry, src, dst NetInfo)
+
+var cEvHandler HandleNewCev // call generated event callback
+
+// RegisterCEvHandler registers a callback for events based on calls.
+// (see HandleNewCEv for more information).
+// It returns the previous callback.
+func RegisterCEvHandler(f HandleNewCev) HandleNewCev {
+	old := cEvHandler
+	cEvHandler = f
+	return old
+}
+
 // maximum size of an event data buffer
 func EventDataMaxBuf() int {
 	s := MaxTagSpace + 16 /* SrcIP */ + 16 /* DstIP */
@@ -601,12 +632,6 @@ func (ed *EventData) String() string {
 	s += fmt.Sprintf("	DBG: msg trace: %s\n", ed.LastMsgs.String())
 	return s
 }
-
-// HandleEvF is a function callback that should handle a new CallEvent.
-// It should copy all the needed information from the passed CallEvent
-// structure, since the data _will_ be overwritten after the call
-// (so all the []byte slices _must_ be copied if needed).
-type HandleEvF func(callev *EventData)
 
 // update "event state", catching already generated events
 // returns ev or EvNone (if event was a retr)

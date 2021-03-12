@@ -82,7 +82,8 @@ func GetCfg() *Config {
 
 // LockCallEntry try to lock a CallEntry.
 // For now it locks the corresp. hash bucket list in the global cstHash.
-// Returns true if successful, false if not (entry not linked in any list).
+// Returns true if successful, false if not (entry "detached",
+// not linked in any list).
 // Warning: since it locks cstHash[e.hashNo] there is a deadlock
 //          if more then one entry with the same hash are locked from the
 //          same thread.
@@ -739,7 +740,7 @@ errorLocked:
 
 func Track(m *sipsp.PSIPMsg, n *[2]NetInfo, f HandleEvF) bool {
 	var evd *EventData
-	if f != nil {
+	if f != nil { // TODO: obsolete
 		// TODO: most likely on the heap (due to f(evd)) => sync.pool
 		var buf = make([]byte, EventDataMaxBuf())
 		evd = &EventData{}
@@ -750,7 +751,16 @@ func Track(m *sipsp.PSIPMsg, n *[2]NetInfo, f HandleEvF) bool {
 		ProcessMsg(m, n, f, evd, CallStProcessUpdate|CallStProcessNew)
 	if e != nil {
 		if match != CallErrMatch && ev != EvNone {
-			f(evd)
+			if f != nil && evd != nil { // TODO: obsolete
+				f(evd)
+			}
+			if cEvHandler != nil {
+				// e.EndPoint[] is never changed after creation, so it
+				// can be safely copied without locking (cannot change)
+				src := e.EndPoint[0]
+				dst := e.EndPoint[1]
+				cEvHandler(ev, e, src, dst)
+			}
 		}
 		e.Unref()
 	}
