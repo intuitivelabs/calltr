@@ -219,7 +219,7 @@ type EvExcInfo struct {
 // FillEvRateInfo fills a EvRateInfo structure from an EvExcInfo,
 //  current rate, max rate, the rate interval and a custom diff exceeded
 //  count diff since last report.
-func FillEvRateInfo(ri *EvRateInfo, exInfo *EvExcInfo,
+func FillEvRateInfo(ri *EvRateInfo, exInfo EvExcInfo,
 	rate, maxr float64, intvl time.Duration, diff uint64) {
 	if exInfo.Exceeded {
 		ri.ExCnt = exInfo.ExConseq
@@ -413,7 +413,7 @@ func (er *EvRateEntry) GetRate(rIdx int, crtT time.Time, maxRates *EvRateMaxes) 
 }
 
 // Match returns true if the entry matches src and event type.
-func (er *EvRateEntry) Match(ev EventType, src *NetInfo) bool {
+func (er *EvRateEntry) Match(ev EventType, src NetInfo) bool {
 	return (er.Ev == ev) && (er.Src.EqualIP(src))
 }
 

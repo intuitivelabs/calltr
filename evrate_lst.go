@@ -134,7 +134,7 @@ func (lst *EvRateEntryLst) ForEach(f func(e *EvRateEntry) bool) {
 // internal refcnt.
 // It does not Lock() the list, so make sure the list is locked if the
 // code can be executed in parallel.
-func (lst *EvRateEntryLst) FindUnsafe(ev EventType, src *NetInfo) *EvRateEntry {
+func (lst *EvRateEntryLst) FindUnsafe(ev EventType, src NetInfo) *EvRateEntry {
 	for e := lst.head.next; e != &lst.head; e = e.next {
 		if e.Match(ev, src) {
 			return e
@@ -258,7 +258,7 @@ type EvRateHash struct {
 }
 
 // Hash computes and returns the index in the hash table.
-func (h *EvRateHash) Hash(src *NetInfo, Ev EventType) uint32 {
+func (h *EvRateHash) Hash(src NetInfo, Ev EventType) uint32 {
 	if src.Flags&NAddrIPv6 != 0 {
 		return GetHash(src.IPAddr[:16], 0, 16) % uint32(len(h.HTable))
 	}
@@ -463,7 +463,7 @@ func (h *EvRateHash) SetRateMax(idx int, maxv float64) bool {
 
 // Get searches for a matching entry and copies it in dst (if found).
 // It returns true if an entry was found, false otherwise
-func (h *EvRateHash) GetCopy(ev EventType, src *NetInfo, dst *EvRateEntry) bool {
+func (h *EvRateHash) GetCopy(ev EventType, src NetInfo, dst *EvRateEntry) bool {
 	i := h.Hash(src, ev)
 	h.HTable[i].Lock()
 	e := h.HTable[i].FindUnsafe(ev, src)
@@ -549,7 +549,7 @@ func (h *EvRateHash) lightGC(target uint32, now time.Time) (bool, uint, bool) {
 //                          exceeded
 //                        - the current value of the exceeded rate (or 0.0)
 //                        - the rate exceeded info/state (EvExcInfo)
-func (h *EvRateHash) IncUpdate(ev EventType, src *NetInfo,
+func (h *EvRateHash) IncUpdate(ev EventType, src NetInfo,
 	crtT time.Time) (bool, int, float64, EvExcInfo) {
 	var rIdx int
 	var cRate float64
@@ -643,7 +643,7 @@ func (h *EvRateHash) IncUpdate(ev EventType, src *NetInfo,
 		h.cnts.grp.Inc(h.cnts.allocF)
 		return false, -1, 0.0, info
 	}
-	n.Src = *src
+	n.Src = src
 	n.Ev = ev
 	n.T0 = crtT
 	n.Ref()
