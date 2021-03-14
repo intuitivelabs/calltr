@@ -16,6 +16,7 @@ import (
 	"unsafe"
 
 	"github.com/intuitivelabs/sipsp"
+	"github.com/intuitivelabs/timestamp"
 )
 
 var BuildTags []string
@@ -217,7 +218,7 @@ func newCallEntry(hashNo, cseq uint32, m *sipsp.PSIPMsg,
 	e.CSeq[dir] = cseq
 	e.Method = m.Method()
 	e.evHandler = evH
-	e.CreatedTS = time.Now()
+	e.CreatedTS = timestamp.Now()
 	e.EndPoint = n
 	return e
 error:
@@ -452,10 +453,10 @@ func forkCallEntry(e *CallEntry, m *sipsp.PSIPMsg, dir int, match CallMatchType,
 			n.ReqsNo[0] = e.ReqsNo[0]
 			n.ReqsNo[1] = e.ReqsNo[1]
 		*/
-		n.prevState = e.prevState // debugging
-		n.lastEv = e.lastEv       // debugging
-		n.CreatedTS = e.CreatedTS // debugging
-		n.forkedTS = time.Now()   // debugging
+		n.prevState = e.prevState    // debugging
+		n.lastEv = e.lastEv          // debugging
+		n.CreatedTS = e.CreatedTS    // debugging
+		n.forkedTS = timestamp.Now() // debugging
 		// not sure about keeping Attrs Reason (?)
 		n.Info.AddFromCi(&e.Info)
 		n.Flags |= CFForkChild
@@ -1061,7 +1062,7 @@ func PrintNCalls(w io.Writer, max int) {
 				e.lastMethod[0], e.lastMethod[1], e.lastReplStatus,
 				e.lastMsgs,
 				e.prevState,
-				e.refCnt, e.Timer.Expire.Sub(time.Now())/time.Second)
+				e.refCnt, e.Timer.Expire.Sub(timestamp.Now())/time.Second)
 			n++
 			if n > max {
 				lst.Unlock()
@@ -1156,7 +1157,7 @@ func PrintCallsFilter(w io.Writer, start, max int, op int, cid []byte, re *regex
 					e.lastMethod[0], e.lastMethod[1], e.lastReplStatus,
 					e.lastMsgs.String(),
 					e.prevState.String(),
-					e.refCnt, e.Timer.Expire.Sub(time.Now())/time.Second,
+					e.refCnt, e.Timer.Expire.Sub(timestamp.Now())/time.Second,
 					e.regBinding)
 				if e.regBinding != nil {
 					lockRegEntry(e.regBinding)

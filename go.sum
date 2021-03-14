@@ -8,3 +8,5 @@ github.com/intuitivelabs/slog v0.0.1 h1:r4S29d0wuHFjQmtl2HLQl/g/NgYVQEQ8lGKMn1Se
 github.com/intuitivelabs/slog v0.0.1/go.mod h1:Ui5r7QQoGGj6/sODBbsz8VJbbylXyx86aVhbdoriIKY=
 github.com/intuitivelabs/slog v0.0.2-0.20210309182339-ec06449a2183 h1:EFlAD+HoZUiNAnipjYudLJGnlP5FUG/SJcGdvyVo+q0=
 github.com/intuitivelabs/slog v0.0.2-0.20210309182339-ec06449a2183/go.mod h1:Ui5r7QQoGGj6/sODBbsz8VJbbylXyx86aVhbdoriIKY=
+github.com/intuitivelabs/timestamp v0.0.2 h1:O9PwhXIlDa7o1CNf50jS4l4jVlwcbZS3A7GoiB3AUEA=
+github.com/intuitivelabs/timestamp v0.0.2/go.mod h1:g6iXgcaQTyNvYhRewLj5li0dhUBrlm0ibApJTklqoXU=

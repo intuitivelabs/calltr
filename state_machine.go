@@ -7,10 +7,9 @@
 package calltr
 
 import (
-	"time"
-
 	"github.com/intuitivelabs/bytescase"
 	"github.com/intuitivelabs/sipsp"
+	"github.com/intuitivelabs/timestamp"
 )
 
 type TimeoutS uint32
@@ -74,14 +73,14 @@ func chgState(e *CallEntry, newState CallState, dir int) CallState {
 				e.Flags &= ^CFCalleeTerminated
 			}
 		case CallStEstablished, CallStNonInvFinished:
-			e.FinReplTS = time.Now()
+			e.FinReplTS = timestamp.Now()
 		case CallStNegReply, CallStCanceled, CallStNonInvNegReply:
 			if e.FinReplTS.IsZero() {
-				e.FinReplTS = time.Now()
+				e.FinReplTS = timestamp.Now()
 			}
 		case CallStEarlyDlg:
 			if e.EarlyDlgTS.IsZero() {
-				e.EarlyDlgTS = time.Now()
+				e.EarlyDlgTS = timestamp.Now()
 			}
 		}
 		if e.State != CallStNone && e.State != CallStInit {

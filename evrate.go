@@ -14,6 +14,8 @@ import (
 	"sync/atomic"
 	"time"
 	"unsafe"
+
+	"github.com/intuitivelabs/timestamp"
 )
 
 const NEvRates = 3 // number of event rate intervals
@@ -133,7 +135,7 @@ func (em *EvRateMaxes) AtomicSetIntvl(idx int, intvl time.Duration) bool {
 
 // EvRate holds an event rate for a specific interval.
 type EvRate struct {
-	Updated time.Time
+	Updated timestamp.TS
 	lastV   uint64 // value at the Updated time
 	Rate    float64
 	Delta   time.Duration // time on which the rate is calculated
@@ -143,7 +145,8 @@ type EvRate struct {
 // last update, without updating the internal values.
 // If less then delta has elapsed it will
 // return (false, max(old rate, v-lastV).
-func (r *EvRate) ComputeRate(v uint64, crtT time.Time, delta time.Duration) (bool, float64) {
+func (r *EvRate) ComputeRate(v uint64, crtT timestamp.TS,
+	delta time.Duration) (bool, float64) {
 	if crtT.Add(-delta).After(r.Updated) {
 		// >= delta passed since last update
 		elapsed := crtT.Sub(r.Updated)
@@ -182,7 +185,8 @@ func (r *EvRate) ComputeRate(v uint64, crtT time.Time, delta time.Duration) (boo
 // since the last update. If the previous rate is less then the
 // "instant" rate, the "instant" rate will be returned (evs since last
 //  rate update).
-func (r *EvRate) Update(v uint64, crtT, t0 time.Time, delta time.Duration) (bool, float64) {
+func (r *EvRate) Update(v uint64, crtT,
+	t0 timestamp.TS, delta time.Duration) (bool, float64) {
 	if r.Updated.IsZero() {
 		// not init
 		r.Updated = t0
@@ -211,9 +215,9 @@ type EvExcInfo struct {
 	// how many times the rate was not exceeded since
 	// last exceeded -> not exceeded transition
 	OkConseq uint64
-	ExChgT   time.Time // time of the last transition (exceeded <-> not ex.)
-	ExLastT  time.Time // time of the last exceeded rate
-	OkLastT  time.Time // time of the last ok update (no rate exceeded)
+	ExChgT   timestamp.TS // time of the last transition (exceeded <-> not ex.)
+	ExLastT  timestamp.TS // time of the last exceeded rate
+	OkLastT  timestamp.TS // time of the last ok update (no rate exceeded)
 }
 
 // FillEvRateInfo fills a EvRateInfo structure from an EvExcInfo,
@@ -235,7 +239,7 @@ func FillEvRateInfo(ri *EvRateInfo, exInfo EvExcInfo,
 
 // String implements the string interface.
 func (e EvExcInfo) String() string {
-	now := time.Now()
+	now := timestamp.Now()
 	s := fmt.Sprintf("exceeded: %v rate_id: %d ex: %d ok: %d"+
 		" ExChgT: %s ago  ExLastT: %s"+
 		" OkLastT: %s",
@@ -254,7 +258,7 @@ type EvRateEntry struct {
 	refCnt     int32
 
 	N     uint64           // how many hits since start
-	T0    time.Time        // time at which the 1st event was generated
+	T0    timestamp.TS     // time at which the 1st event was generated
 	Rates [NEvRates]EvRate // recorded rates
 
 	exState EvExcInfo // info/state about exceeding one of the rates.
@@ -302,7 +306,7 @@ func (er *EvRateEntry) Unref() bool {
 //  rate if nothing was exceeded), the current computed value for the rate
 // that was exceeded (or the first non zero rate) and the exceeded state
 // (in a EvExcInfo structure).
-func (er *EvRateEntry) UpdateRates(crtT time.Time, maxRates *EvRateMaxes,
+func (er *EvRateEntry) UpdateRates(crtT timestamp.TS, maxRates *EvRateMaxes,
 	evCntUpd uint) (int, float64, EvExcInfo) {
 
 	stateChg := false
@@ -378,7 +382,7 @@ func (er *EvRateEntry) Inc() {
 
 // IncUpdateR incrementes the ev no and updates the rates.
 // See UpdateRates() for the parameter and return values.
-func (er *EvRateEntry) IncUpdateR(crtT time.Time, maxRates *EvRateMaxes) (int, float64, EvExcInfo) {
+func (er *EvRateEntry) IncUpdateR(crtT timestamp.TS, maxRates *EvRateMaxes) (int, float64, EvExcInfo) {
 	er.Inc()
 	return er.UpdateRates(crtT, maxRates, 1)
 }
@@ -391,7 +395,8 @@ func (er *EvRateEntry) IncUpdateR(crtT time.Time, maxRates *EvRateMaxes) (int, f
 //                              current rate. Can be nil (in this case the
 //                              current interval saved inside er will be used).
 // It returns true and value on success, false on error.
-func (er *EvRateEntry) GetRate(rIdx int, crtT time.Time, maxRates *EvRateMaxes) (bool, float64) {
+func (er *EvRateEntry) GetRate(rIdx int, crtT timestamp.TS,
+	maxRates *EvRateMaxes) (bool, float64) {
 	if rIdx < len(er.Rates) {
 		if er.Rates[rIdx].Updated.IsZero() {
 			// not initialized yet (not enough time passed?)
@@ -441,7 +446,7 @@ func (er *EvRateEntry) Copy(src *EvRateEntry) {
 //		            interval part is used to compute the current rate.
 //		            Can be nil (the last/current interval will be used).
 func (er *EvRateEntry) matchEvRateEntry(val int, rateIdx, rateVal int,
-	net *net.IPNet, re *regexp.Regexp, crtT time.Time,
+	net *net.IPNet, re *regexp.Regexp, crtT timestamp.TS,
 	maxRates *EvRateMaxes) bool {
 
 	if val >= 0 && !(er.exState.Exceeded == (val > 0)) {
@@ -514,7 +519,7 @@ func (m MatchOp) String() string {
 	return "n/a"
 }
 
-func opCmpTime(T1 time.Time, op MatchOp, T2 time.Time) bool {
+func opCmpTime(T1 timestamp.TS, op MatchOp, T2 timestamp.TS) bool {
 	return (op == MOpNone) ||
 		((op&MOpLT) != 0 && T1.Before(T2)) ||
 		((op&MOpEQ) != 0 && T1.Equal(T2)) ||
@@ -547,17 +552,17 @@ type MatchEvRTS struct {
 	OpEx MatchOp
 	Ex   bool // match against EvRate.exState.Exceeded (true for blacklisted)
 
-	OpT0 MatchOp   // T0 OpT0 EvRate.T0
-	T0   time.Time // compare against time of entry creation
+	OpT0 MatchOp      // T0 OpT0 EvRate.T0
+	T0   timestamp.TS // compare against time of entry creation
 
-	OpExChgT MatchOp   // ExChgT OpOpExChgT EvRate.exState.ExChgT
-	ExChgT   time.Time // compare against time of the last transition
+	OpExChgT MatchOp      // ExChgT OpOpExChgT EvRate.exState.ExChgT
+	ExChgT   timestamp.TS // compare against time of the last transition
 
-	OpExLastT MatchOp   // ExLastT OpExLastT EvRate.exState.ExLastT
-	ExLastT   time.Time // compare against time of the last exceeded rate
+	OpExLastT MatchOp      // ExLastT OpExLastT EvRate.exState.ExLastT
+	ExLastT   timestamp.TS // compare against time of the last exceeded rate
 
-	OpOkLastT MatchOp   // OkLastT OpOkLastT EvRate.exState.OkLastT
-	OkLastT   time.Time // compare against time of the last ok update
+	OpOkLastT MatchOp      // OkLastT OpOkLastT EvRate.exState.OkLastT
+	OkLastT   timestamp.TS // compare against time of the last ok update
 }
 
 // MatchST returns true if m matches er according to the match operators for
@@ -605,7 +610,7 @@ func (m MatchEvROffs) String() string {
 }
 
 // ToMatchEvRTS converts to a MatchEvRTS structure based on refT.
-func (m MatchEvROffs) MatchBefore(refT time.Time) MatchEvRTS {
+func (m MatchEvROffs) MatchBefore(refT timestamp.TS) MatchEvRTS {
 
 	return MatchEvRTS{
 		OpEx:      m.OpEx,

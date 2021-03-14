@@ -17,6 +17,7 @@ import (
 	"unsafe"
 
 	"github.com/intuitivelabs/counters"
+	"github.com/intuitivelabs/timestamp"
 )
 
 // EvRateDefaultIntvls holds the default time intervals for which event rates
@@ -476,7 +477,7 @@ func (h *EvRateHash) GetCopy(ev EventType, src NetInfo, dst *EvRateEntry) bool {
 
 // hardGC tries hard to free memory up to target.
 // returns true if succeeds, number of walked entries and a timeout flag.
-func (h *EvRateHash) hardGC(target uint32, now time.Time) (bool, uint, bool) {
+func (h *EvRateHash) hardGC(target uint32, now timestamp.TS) (bool, uint, bool) {
 	// try evicting older entries than
 	//        Now - ForceGCtimeL[k] till success (target met)
 	// Each GC run has a time limit in h.gcCfg.ForceGCrunL.
@@ -494,7 +495,7 @@ func (h *EvRateHash) hardGC(target uint32, now time.Time) (bool, uint, bool) {
 	strategyIdx := atomic.LoadUint32(&h.gcStrategy)
 	for k = int(strategyIdx); k < len(matchConds); k++ {
 		m := matchConds[k].MatchBefore(now)
-		runLim := time.Time{}
+		runLim := timestamp.Zero()
 		if k < len(runTimes) {
 			runLim = now.Add(runTimes[k])
 		} else if len(runTimes) > 0 {
@@ -527,7 +528,7 @@ func (h *EvRateHash) hardGC(target uint32, now time.Time) (bool, uint, bool) {
 
 // lightGC tries to free memory up to target, in a lightweight way.
 // returns true if succeeds, number of walked entries and a timeout flag.
-func (h *EvRateHash) lightGC(target uint32, now time.Time) (bool, uint, bool) {
+func (h *EvRateHash) lightGC(target uint32, now timestamp.TS) (bool, uint, bool) {
 	var m MatchEvRTS
 	m.OpEx = MOpEQ
 	m.Ex = false        // match non exceeded values only
@@ -550,7 +551,7 @@ func (h *EvRateHash) lightGC(target uint32, now time.Time) (bool, uint, bool) {
 //                        - the current value of the exceeded rate (or 0.0)
 //                        - the rate exceeded info/state (EvExcInfo)
 func (h *EvRateHash) IncUpdate(ev EventType, src NetInfo,
-	crtT time.Time) (bool, int, float64, EvExcInfo) {
+	crtT timestamp.TS) (bool, int, float64, EvExcInfo) {
 	var rIdx int
 	var cRate float64
 	var info EvExcInfo
@@ -740,7 +741,7 @@ func (h *EvRateHash) getNextExceededLock(bIdx, bPos uint, val bool) (*EvRateEntr
 //    chkTo    - check the time limit (rLim) every chkTo entries
 //    chkoffs  - initial offset for checking the time limit
 //
-// Any of the time limits can be 0 (time.Time{}), in which case it will
+// Any of the time limits can be 0 (timestamp.Zero()), in which case it will
 // be ignored (matches always).
 //
 // The check for run time exceed will be performed every chkto entries
@@ -749,8 +750,8 @@ func (h *EvRateHash) getNextExceededLock(bIdx, bPos uint, val bool) (*EvRateEntr
 // returns target_met, walked_entries_no, timeout
 func (h *EvRateHash) evictLst(m MatchEvRTS,
 	first *EvRateEntry, lst *EvRateEntryLst, maxE uint,
-	target uint64, rLim time.Time, chkto, chkoffs uint,
-	crtT time.Time) (bool, uint, bool) {
+	target uint64, rLim timestamp.TS, chkto, chkoffs uint,
+	crtT timestamp.TS) (bool, uint, bool) {
 
 	n := uint(0)
 	for e, nxt := first, first.next; e != &lst.head; e, nxt = nxt, nxt.next {
@@ -768,7 +769,7 @@ func (h *EvRateHash) evictLst(m MatchEvRTS,
 		n++
 		if (n >= maxE) ||
 			(chkto != 0 && ((n+chkoffs)%chkto) == 0 &&
-				!rLim.IsZero() && time.Now().After(rLim)) {
+				!rLim.IsZero() && timestamp.Now().After(rLim)) {
 			return false, n, !(n >= maxE)
 		}
 	}
@@ -792,7 +793,7 @@ func (h *EvRateHash) evictLst(m MatchEvRTS,
 // the number of "walked" entries and whether or not it ended due to
 // timeout (rLim exceeded).
 func (h *EvRateHash) ForceEvict(target uint64, m MatchEvRTS,
-	crtT, rLim time.Time) (bool, uint, bool) {
+	crtT, rLim timestamp.TS) (bool, uint, bool) {
 	const ChkT = 10000 // how often to check time
 	var ok, to bool
 	var n uint
@@ -924,7 +925,7 @@ func (h *EvRateHash) PrintFilter(w io.Writer, start, max int,
 	val int, rateIdx, rateVal int, net *net.IPNet, re *regexp.Regexp) {
 	n := 0
 	printed := 0
-	now := time.Now()
+	now := timestamp.Now()
 	for i := 0; i < len(h.HTable); i++ {
 		lst := &h.HTable[i]
 		lst.Lock()
