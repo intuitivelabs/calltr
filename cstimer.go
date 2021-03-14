@@ -299,7 +299,7 @@ func csTimerUpdateTimeoutUnsafe(cs *CallEntry, after time.Duration,
 			WARN("csTimerUpdateTimeoutUnsafe: update timer  failed: backtrace:\n"+
 				"%s\n", buf[:n])
 			WARN("csTimerUpdateTimeoutUnsafe: update timer  failed"+
-				" for call entry %p: %v with %d ns\n",
+				" for call entry %p: %v with %s after\n",
 				buf[:n], cs, *cs, after)
 		}
 		return false
