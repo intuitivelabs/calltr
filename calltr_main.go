@@ -80,13 +80,14 @@ func GetCfg() *Config {
 	return (*Config)(p)
 }
 
-// Locks a CallEntry.
+// LockCallEntry try to lock a CallEntry.
 // For now it locks the corresp. hash bucket list in the global cstHash.
-// Returns true if successful, false if not (entry not linked in any list).
+// Returns true if successful, false if not (entry "detached",
+// not linked in any list).
 // Warning: since it locks cstHash[e.hashNo] there is a deadlock
 //          if more then one entry with the same hash are locked from the
 //          same thread.
-func lockCallEntry(e *CallEntry) bool {
+func LockCallEntry(e *CallEntry) bool {
 
 	h := e.hashNo
 	if h < uint32(len(cstHash.HTable)) && (e.next != e) {
@@ -101,10 +102,11 @@ func lockCallEntry(e *CallEntry) bool {
 	return false
 }
 
-// Unlocks a CallEntry.
+// UnlockCallEntry unlocks a CallEntry, previously locked with LockCallEntry.
+// WARNING: use only if LockCallEntry() returned true.
 // Returns false if it fails (invalid CallEntry hashNo).
-// See also lockCallEntry()
-func unlockCallEntry(e *CallEntry) bool {
+// See also LockCallEntry()
+func UnlockCallEntry(e *CallEntry) bool {
 	h := e.hashNo
 	if h < uint32(len(cstHash.HTable)) {
 		cstHash.HTable[h].Unlock()
@@ -153,7 +155,8 @@ func unlockRegEntry(r *RegEntry) bool {
 // a request coming from the callee should never happen: even if we see
 // first something like that we wouldn't be able to know who initiated the
 // the dialog and hence the dir).
-func newCallEntry(hashNo, cseq uint32, m *sipsp.PSIPMsg, n *[2]NetInfo, dir int, evH HandleEvF) *CallEntry {
+func newCallEntry(hashNo, cseq uint32, m *sipsp.PSIPMsg,
+	n [2]NetInfo, dir int, evH HandleEvF) *CallEntry {
 	toTagL := uint(m.PV.To.Tag.Len)
 	if toTagL == 0 { // TODO: < DefaultToTagLen (?)
 		toTagL = DefaultToTagLen
@@ -215,9 +218,7 @@ func newCallEntry(hashNo, cseq uint32, m *sipsp.PSIPMsg, n *[2]NetInfo, dir int,
 	e.Method = m.Method()
 	e.evHandler = evH
 	e.CreatedTS = time.Now()
-	if n != nil {
-		e.EndPoint = *n // FIXME
-	}
+	e.EndPoint = n
 	return e
 error:
 	if e != nil {
@@ -437,7 +438,7 @@ func forkCallEntry(e *CallEntry, m *sipsp.PSIPMsg, dir int, match CallMatchType,
 	if flags&CallStProcessNoAlloc != 0 {
 		return nil // alloc/fork not allowed, exit
 	}
-	n := newCallEntry(e.hashNo, 0, m, &e.EndPoint, dir, e.evHandler)
+	n := newCallEntry(e.hashNo, 0, m, e.EndPoint, dir, e.evHandler)
 	if n != nil {
 		// TODO:  make sure all the relevant entry data is cloned
 		if dir == 0 {
@@ -577,7 +578,8 @@ func unlinkCallEntryUnsafe(e *CallEntry, unref bool) bool {
 // calle, match, dir = ProcessMsg(sipmsg, CallStProcessUpdate CallStNoAlloc)
 // calle.Unref()
 //
-func ProcessMsg(m *sipsp.PSIPMsg, n *[2]NetInfo, f HandleEvF, evd *EventData, flags CallStProcessFlags) (*CallEntry, CallMatchType, int, EventType) {
+func ProcessMsg(m *sipsp.PSIPMsg, ni [2]NetInfo, f HandleEvF, evd *EventData,
+	flags CallStProcessFlags) (*CallEntry, CallMatchType, int, EventType) {
 	var to TimeoutS
 	var toF TimerUpdateF
 	ev := EvNone
@@ -609,11 +611,11 @@ func ProcessMsg(m *sipsp.PSIPMsg, n *[2]NetInfo, f HandleEvF, evd *EventData, fl
 			if !m.FL.Request() {
 				//  if entry is created from a reply, invert ip addresses
 				var endpoints [2]NetInfo
-				endpoints[0], endpoints[1] = n[1], n[0]
-				n = &endpoints
-				e = newCallEntry(hashNo, 0, m, n, 0, f)
+				endpoints[0], endpoints[1] = ni[1], ni[0]
+				ni = endpoints
+				e = newCallEntry(hashNo, 0, m, ni, 0, f)
 			} else {
-				e = newCallEntry(hashNo, 0, m, n, 0, f)
+				e = newCallEntry(hashNo, 0, m, ni, 0, f)
 			}
 			if e == nil {
 				if DBGon() {
@@ -736,9 +738,9 @@ errorLocked:
 	return nil, CallErrMatch, 0, EvNone
 }
 
-func Track(m *sipsp.PSIPMsg, n *[2]NetInfo, f HandleEvF) bool {
+func Track(m *sipsp.PSIPMsg, n [2]NetInfo, f HandleEvF) bool {
 	var evd *EventData
-	if f != nil {
+	if f != nil { // TODO: obsolete
 		// TODO: most likely on the heap (due to f(evd)) => sync.pool
 		var buf = make([]byte, EventDataMaxBuf())
 		evd = &EventData{}
@@ -749,7 +751,16 @@ func Track(m *sipsp.PSIPMsg, n *[2]NetInfo, f HandleEvF) bool {
 		ProcessMsg(m, n, f, evd, CallStProcessUpdate|CallStProcessNew)
 	if e != nil {
 		if match != CallErrMatch && ev != EvNone {
-			f(evd)
+			if f != nil && evd != nil { // TODO: obsolete
+				f(evd)
+			}
+			if cEvHandler != nil {
+				// e.EndPoint[] is never changed after creation, so it
+				// can be safely copied without locking (cannot change)
+				src := e.EndPoint[0]
+				dst := e.EndPoint[1]
+				cEvHandler(ev, e, src, dst)
+			}
 		}
 		e.Unref()
 	}

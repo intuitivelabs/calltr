@@ -70,12 +70,12 @@ func (n *NetInfo) IP() net.IP {
 	return net.IP(n.IPAddr[:4])
 }
 
-func (n *NetInfo) SetIP(ip *net.IP) {
-	if len(*ip) == 16 {
-		n.SetIPv6([]byte(*ip))
+func (n *NetInfo) SetIP(ip net.IP) {
+	if len(ip) == 16 {
+		n.SetIPv6([]byte(ip))
 		return
 	}
-	n.SetIPv4([]byte(*ip))
+	n.SetIPv4([]byte(ip))
 }
 
 func (n *NetInfo) SetIPv4(ip []byte) {
@@ -105,7 +105,7 @@ func (n *NetInfo) ProtoName() string {
 }
 
 // Equal checks for equality (same protocol, ip type, port and address).
-func (n *NetInfo) Equal(o *NetInfo) bool {
+func (n *NetInfo) Equal(o NetInfo) bool {
 	if (n.Flags != o.Flags) || (n.Port != o.Port) {
 		return false
 	}
@@ -116,7 +116,7 @@ func (n *NetInfo) Equal(o *NetInfo) bool {
 }
 
 // EqualIP checks if the IP addresses are equal.
-func (n *NetInfo) EqualIP(o *NetInfo) bool {
+func (n *NetInfo) EqualIP(o NetInfo) bool {
 	if (n.Flags & NAddrIPv6) != (o.Flags & NAddrIPv6) {
 		return false
 	}

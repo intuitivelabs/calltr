@@ -144,6 +144,7 @@ func csTimerStartUnsafe(cs *CallEntry) bool {
 		expire := cs.Timer.Expire.Add(-time.Second / 10) // sub sec/10
 		cstHash.HTable[cs.hashNo].Unlock()
 		if expire.Before(now) || expire.Equal(now) {
+			var src, dst NetInfo
 			ev := EvNone
 			var evd *EventData
 			if cs.evHandler != nil {
@@ -168,12 +169,21 @@ func csTimerStartUnsafe(cs *CallEntry) bool {
 					evd.Fill(ev, cs)
 				}
 			}
+			if removed {
+				src = cs.EndPoint[0]
+				dst = cs.EndPoint[1]
+			}
 			cstHash.HTable[cs.hashNo].Unlock()
 			// mark timer as dead/done
 			if removed {
 				// call event callback, outside the hash lock
-				if ev != EvNone && evd != nil && cs.evHandler != nil {
-					cs.evHandler(evd)
+				if ev != EvNone {
+					if evd != nil && cs.evHandler != nil { // TODO: obsolete
+						cs.evHandler(evd)
+					}
+					if cEvHandler != nil {
+						cEvHandler(ev, cs, src, dst)
+					}
 				}
 				cs.Unref()
 				return
@@ -289,7 +299,7 @@ func csTimerUpdateTimeoutUnsafe(cs *CallEntry, after time.Duration,
 			WARN("csTimerUpdateTimeoutUnsafe: update timer  failed: backtrace:\n"+
 				"%s\n", buf[:n])
 			WARN("csTimerUpdateTimeoutUnsafe: update timer  failed"+
-				" for call entry %p: %v with %d ns\n",
+				" for call entry %p: %v with %s after\n",
 				buf[:n], cs, *cs, after)
 		}
 		return false
