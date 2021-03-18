@@ -11,9 +11,9 @@ import (
 	//	"fmt"
 	"strconv" // dbg
 	"sync/atomic"
-	"time"
 
 	"github.com/intuitivelabs/sipsp"
+	"github.com/intuitivelabs/timestamp"
 )
 
 const (
@@ -843,12 +843,10 @@ type CallEntry struct {
 	// used only for REGISTERS:
 	regBinding *RegEntry // pointer to cached registry binding
 
-	// TODO: replace all time.Time with uint64 (time.Time is too big and
-	//       has a time zone _pointer_ inside causing extra uneeded GC work)
-	FinReplTS      time.Time // final call establisment reply (>= 200)
-	EarlyDlgTS     time.Time // early dialog (18x)
-	CreatedTS      time.Time // call entry creation time
-	forkedTS       time.Time // debugging
+	FinReplTS      timestamp.TS // final call establisment reply (>= 200)
+	EarlyDlgTS     timestamp.TS // early dialog (18x)
+	CreatedTS      timestamp.TS // call entry creation time
+	forkedTS       timestamp.TS // debugging
 	ReqsRetrNo     [2]uint
 	ReplsRetrNo    [2]uint
 	lastMethod     [2]sipsp.SIPMethod // last non-retr. method  in the "dialog"

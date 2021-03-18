@@ -11,11 +11,13 @@ import (
 	"sync/atomic"
 	"time"
 	"unsafe"
+
+	"github.com/intuitivelabs/timestamp"
 )
 
 // timers and timer related functions
 type TimerInfo struct {
-	Expire time.Time // TODO: replace with uint64, time.Time has pointer inside
+	Expire timestamp.TS
 	Handle *time.Timer
 	done   int32 // terminated timers set this to 1
 	// TODO: eg. expire, timer handle, list connector ...
@@ -28,7 +30,7 @@ func (t *TimerInfo) UpdateSec(s int64) {
 
 // Unsafe, must be called w/ locking
 func (t *TimerInfo) Update(after time.Duration) {
-	newExpire := time.Now().Add(after)
+	newExpire := timestamp.Now().Add(after)
 	if newExpire.Before(t.Expire) {
 		// have to delete and re-add the timer
 	}
@@ -38,7 +40,7 @@ func (t *TimerInfo) Update(after time.Duration) {
 */
 
 func (t *TimerInfo) Init(after time.Duration) {
-	t.Expire = time.Now().Add(after)
+	t.Expire = timestamp.Now().Add(after)
 	t.Handle = nil
 	t.done = 0
 }
@@ -72,7 +74,7 @@ func (t *TimerInfo) TryStop() bool {
 
 // updates timeout if allowed by the flags (f) and possible.
 func (t *TimerInfo) UpdateTimeout(after time.Duration, f TimerUpdateF) bool {
-	newExpire := time.Now().Add(after)
+	newExpire := timestamp.Now().Add(after)
 	if f&FTimerUpdForce != FTimerUpdForce {
 		if f&FTimerUpdGT != 0 && !newExpire.After(t.Expire) {
 			return true
@@ -87,7 +89,7 @@ func (t *TimerInfo) UpdateTimeout(after time.Duration, f TimerUpdateF) bool {
 		if t.TryStop() {
 			// re-init timer preserving the handle
 			t.done = 0
-			t.Expire = time.Now().Add(after)
+			t.Expire = timestamp.Now().Add(after)
 			if t.Handle.Reset(after) {
 				WARN("UpdateTimeout: reset active timer  failed"+
 					" for timer entry %p: %v\n", t, *t)
@@ -115,7 +117,7 @@ func (t *TimerInfo) Start(f func()) bool {
 		return false
 	}
 	// timer routine
-	h := time.AfterFunc(t.Expire.Sub(time.Now()), f)
+	h := time.AfterFunc(t.Expire.Sub(timestamp.Now()), f)
 	if h == nil {
 		return false
 	}
@@ -126,7 +128,7 @@ func (t *TimerInfo) Start(f func()) bool {
 // TODO: use TimerInfo.* inside csTimer*
 
 func csTimerInitUnsafe(cs *CallEntry, after time.Duration) {
-	cs.Timer.Expire = time.Now().Add(after)
+	cs.Timer.Expire = timestamp.Now().Add(after)
 	cs.Timer.Handle = nil
 	cs.Timer.done = 0
 }
@@ -138,7 +140,7 @@ func csTimerStartUnsafe(cs *CallEntry) bool {
 	handleAddr := (*unsafe.Pointer)(unsafe.Pointer(&cs.Timer.Handle))
 
 	callstTimer := func() {
-		now := time.Now()
+		now := timestamp.Now()
 		// allow for small errors
 		cstHash.HTable[cs.hashNo].Lock()
 		expire := cs.Timer.Expire.Add(-time.Second / 10) // sub sec/10
@@ -207,7 +209,7 @@ func csTimerStartUnsafe(cs *CallEntry) bool {
 		return false
 	}
 	// timer routine
-	h := time.AfterFunc(cs.Timer.Expire.Sub(time.Now()), callstTimer)
+	h := time.AfterFunc(cs.Timer.Expire.Sub(timestamp.Now()), callstTimer)
 	if h == nil {
 		return false
 	}
@@ -255,7 +257,7 @@ const FTimerUpdForce TimerUpdateF = FTimerUpdGT | FTimerUpdLT
 
 func csTimerUpdateTimeoutUnsafe(cs *CallEntry, after time.Duration,
 	f TimerUpdateF) bool {
-	newExpire := time.Now().Add(after)
+	newExpire := timestamp.Now().Add(after)
 	if f&FTimerUpdForce != FTimerUpdForce {
 		if f&FTimerUpdGT != 0 && !newExpire.After(cs.Timer.Expire) {
 			return true
@@ -268,7 +270,7 @@ func csTimerUpdateTimeoutUnsafe(cs *CallEntry, after time.Duration,
 		// timeout reduced => have to stop & re-add
 		// extra-debugging for REGISTER
 		/*
-			if cs.Method == sipsp.MRegister && cs.crtEv != EvRegDel && cs.Timer.Expire.Sub(time.Now()) > 59*time.Second && cs.Timer.Expire.Sub(newExpire) > 4*time.Second {
+			if cs.Method == sipsp.MRegister && cs.crtEv != EvRegDel && cs.Timer.Expire.Sub(timestamp.Now()) > 59*time.Second && cs.Timer.Expire.Sub(newExpire) > 4*time.Second {
 				DBG("TIMER: REGISTER:"+
 					" state %q <- %q  msg trace: %q flags %q crtEv %q"+
 					" lastEv %q evFlags %q:"+
@@ -277,7 +279,7 @@ func csTimerUpdateTimeoutUnsafe(cs *CallEntry, after time.Duration,
 					cs.Flags, cs.crtEv, cs.lastEv,
 					cs.EvFlags.String(),
 					cs.Key.GetCallID(),
-					cs.Timer.Expire.Sub(time.Now()), after)
+					cs.Timer.Expire.Sub(timestamp.Now()), after)
 			}
 		*/
 		//extra-debugging END
@@ -285,7 +287,7 @@ func csTimerUpdateTimeoutUnsafe(cs *CallEntry, after time.Duration,
 		if csTimerTryStopUnsafe(cs) {
 			// re-init timer preserving the handle
 			cs.Timer.done = 0
-			cs.Timer.Expire = time.Now().Add(after)
+			cs.Timer.Expire = timestamp.Now().Add(after)
 			if cs.Timer.Handle.Reset(after) {
 				WARN("csTimerUpdateTimeoutUnsafe: reset active timer failed"+
 					" for call entry %p: %v\n", cs, *cs)

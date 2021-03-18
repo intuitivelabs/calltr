@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/intuitivelabs/sipsp"
+	"github.com/intuitivelabs/timestamp"
 )
 
 type EventType uint8
@@ -203,18 +204,18 @@ type EvRateInfo struct {
 	Intvl     time.Duration // interval for the rate
 	// when the rate was exceeded the first time or if not exceeded
 	// (ExCnt == 0), the time since the rate is ok
-	T time.Time
+	T timestamp.TS
 }
 
 type EventData struct {
 	Type      EventType
 	Truncated bool
-	TS        time.Time // event creation time
-	CreatedTS time.Time // call entry creation
+	TS        timestamp.TS // event creation time
+	CreatedTS timestamp.TS // call entry creation
 	// final call establisment reply (>= 200), e.g. 2xx or 4xx time
 	// (note: this is for the initial call-establishing request)
-	FinReplTS  time.Time
-	EarlyDlgTS time.Time // early dialog (18x), 0 if no 18x
+	FinReplTS  timestamp.TS
+	EarlyDlgTS timestamp.TS // early dialog (18x), 0 if no 18x
 	Src        net.IP
 	Dst        net.IP
 	SPort      uint16
@@ -229,7 +230,7 @@ type EventData struct {
 	CFlags CallFlags // info about who terminated the call, timeouts a.s.o.
 
 	// debugging
-	ForkedTS   time.Time
+	ForkedTS   timestamp.TS
 	State      CallState
 	PrevState  StateBackTrace
 	LastMethod [2]sipsp.SIPMethod
@@ -287,7 +288,7 @@ func (d *EventData) Fill(ev EventType, e *CallEntry) int {
 	d.Type = ev
 	d.Truncated = false
 	d.Used = 0
-	d.TS = time.Now()
+	d.TS = timestamp.Now()
 	d.CreatedTS = e.CreatedTS
 	d.FinReplTS = e.FinReplTS
 	d.EarlyDlgTS = e.EarlyDlgTS
@@ -421,10 +422,10 @@ func (d *EventData) FillBasic(ev EventType,
 	d.Type = ev
 	d.Truncated = false
 	d.Used = 0
-	d.TS = time.Now()
+	d.TS = timestamp.Now()
 	d.CreatedTS = d.TS
-	d.FinReplTS = time.Time{}  // zero
-	d.EarlyDlgTS = time.Time{} // zero
+	d.FinReplTS = timestamp.Zero()
+	d.EarlyDlgTS = timestamp.Zero()
 	d.ProtoF = proto
 	ip := srcIP
 	n := copy(d.Buf[d.Used:], ip)
@@ -447,7 +448,7 @@ func (d *EventData) FillBasic(ev EventType,
 	d.ReplStatus = 0
 
 	//debug stuff
-	d.ForkedTS = time.Time{}
+	d.ForkedTS = timestamp.Zero()
 	d.State = CallStNone
 	d.PrevState = StateBackTrace{}
 	d.LastMethod[0] = sipsp.MUndef
@@ -499,7 +500,7 @@ func (d *EventData) FillFromRegEntry(ev EventType, e *RegEntry) int {
 	var forcedReason []byte
 	d.Type = ev
 	d.Truncated = false
-	d.TS = time.Now()
+	d.TS = timestamp.Now()
 	d.CreatedTS = e.CreatedTS
 	d.FinReplTS = e.FinReplTS
 	d.EarlyDlgTS = e.EarlyDlgTS
@@ -595,7 +596,7 @@ func (ed *EventData) String() string {
 		ed.Type, ed.Truncated, ed.Valid, ed.Used, cap(ed.Buf),
 		ed.TS.Truncate(time.Second),
 		ed.CreatedTS.Truncate(time.Second),
-		time.Now().Sub(ed.CreatedTS).Truncate(time.Second),
+		timestamp.Now().Sub(ed.CreatedTS).Truncate(time.Second),
 		ed.FinReplTS.Truncate(time.Second),
 		duration,
 		pdd, ringt,
