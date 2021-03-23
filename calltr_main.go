@@ -57,6 +57,7 @@ var regHash RegEntryHash
 func init() {
 	cstHash.Init(HashSize)
 	regHash.Init(HashSize)
+	initTimers()
 }
 
 // SetCfg sets a new global config for calltr.
