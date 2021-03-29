@@ -78,6 +78,12 @@ func TestCallStateAllocLstGC(t *testing.T) {
 	GCentries := 0    // garbage collected entries
 	BadGCEntries := 0 // entries that should not have been gc'ed (not freed)
 
+	startUsed := uint64(0)
+	if AllocType == AllocQMalloc {
+		used := qm.MUsage()
+		startUsed = used.Used
+	}
+
 	i := 0
 	for ; i < N; i++ {
 		sz := uint(rand.Intn(128))
@@ -118,6 +124,14 @@ func TestCallStateAllocLstGC(t *testing.T) {
 				pce := unsafe.Pointer(uintptr(unsafe.Pointer(b)) +
 					uintptr(bHdrSize))
 				c := (*CallEntry)(pce)
+				GCentries++
+				if c.hashNo != (^uint32(0) - 1) {
+					BadGCEntries++
+				}
+			})
+		} else if AllocType != AllocQMalloc {
+			runtime.SetFinalizer(e, nil)
+			runtime.SetFinalizer(e, func(c *CallEntry) {
 				GCentries++
 				if c.hashNo != (^uint32(0) - 1) {
 					BadGCEntries++
@@ -167,15 +181,26 @@ func TestCallStateAllocLstGC(t *testing.T) {
 	}
 	t.Logf("after final force GC (GCentries=%d/%d Bad=%d)\n",
 		GCentries, N, BadGCEntries)
-	if GCentries != N {
-		t.Errorf("too few entries garabage collected after freeing them"+
-			" and force GC run %d/%d (not freed %d)\n",
-			GCentries, N, BadGCEntries)
-	}
-	if BadGCEntries != 0 {
-		t.Errorf("entries GCed but not freed (FreeCallEnty()):"+
-			" %d/%d (total GCed: %d)\n",
-			BadGCEntries, N, GCentries)
+	if AllocType == AllocQMalloc {
+		used := qm.MUsage()
+		endUsed := used.Used
+		if endUsed != startUsed {
+			t.Errorf("QMalloc memory leak: start %d end %d"+
+				" => %d difference (%+v)\n",
+				startUsed, endUsed, endUsed-startUsed,
+				qm.MUsage())
+		}
+	} else {
+		if GCentries != N {
+			t.Errorf("too few entries garabage collected after freeing them"+
+				" and force GC run %d/%d (not freed %d)\n",
+				GCentries, N, BadGCEntries)
+		}
+		if BadGCEntries != 0 {
+			t.Errorf("entries GCed but not freed (FreeCallEnty()):"+
+				" %d/%d (total GCed: %d)\n",
+				BadGCEntries, N, GCentries)
+		}
 	}
 	//	t.Logf("%d test runs (alloc type %q build tags %v)\n", i,
 	//		AllocTypeName, BuildTags)
