@@ -107,14 +107,23 @@ func TestCallStateAllocLstGC(t *testing.T) {
 			t.Errorf("alignment error for e: %p not multiple of %d\n",
 				e, unsafe.Alignof(*e))
 		}
+
 		// set new, test finaliser
-		runtime.SetFinalizer(e, nil)
-		runtime.SetFinalizer(e, func(c *CallEntry) {
-			GCentries++
-			if c.hashNo != (^uint32(0) - 1) {
-				BadGCEntries++
-			}
-		})
+		if AllocType == AllocOneBlock {
+			bHdrSize := uint(unsafe.Sizeof(pblockInfo{}))
+			pbHdr := (*pblockInfo)(unsafe.Pointer(uintptr(unsafe.Pointer(e)) -
+				uintptr(bHdrSize)))
+			runtime.SetFinalizer(pbHdr, nil)
+			runtime.SetFinalizer(pbHdr, func(b *pblockInfo) {
+				pce := unsafe.Pointer(uintptr(unsafe.Pointer(b)) +
+					uintptr(bHdrSize))
+				c := (*CallEntry)(pce)
+				GCentries++
+				if c.hashNo != (^uint32(0) - 1) {
+					BadGCEntries++
+				}
+			})
+		}
 		e.hashNo = 0
 		lst.Insert(e)
 	}
