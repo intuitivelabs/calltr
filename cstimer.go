@@ -81,11 +81,12 @@ func csTimer(wt *wtimer.WTimer, h *wtimer.TimerLnk,
 	// allow for small errors
 	cstHash.HTable[cs.hashNo].Lock()
 	// TODO: atomic
-	expire := cs.Timer.Expire.Add(-time.Second / 10) // sub sec/10
+	expire := timestamp.AtomicLoad(&cs.Timer.Expire)
+	expire = expire.Add(-time.Second / 10) // sub sec/10
 	cstHash.HTable[cs.hashNo].Unlock()
 
 	/* DBG start timer drift  -- TODO: add some counters
-	target := cs.Timer.Expire
+	target := timestamp.AtomicLoad(&cs.Timer.Expire)
 	if target.After(now) &&
 		target.Sub(now) > 1*timerTick {
 	} else if target.Before(now) &&
@@ -106,7 +107,8 @@ func csTimer(wt *wtimer.WTimer, h *wtimer.TimerLnk,
 		cstHash.HTable[cs.hashNo].Lock()
 		removed := false
 		// check again, in case we are racing with an Update
-		expire = cs.Timer.Expire.Add(-time.Second / 10) // sub sec/10
+		expire = timestamp.AtomicLoad(&cs.Timer.Expire)
+		expire = expire.Add(-time.Second / 10) // sub sec/10
 		if expire.Before(now) || expire.Equal(now) {
 			// remove from the hashes, but still keep a ref.
 			removed = unlinkCallEntryUnsafe(cs, false)
@@ -140,7 +142,8 @@ func csTimer(wt *wtimer.WTimer, h *wtimer.TimerLnk,
 		} // else fall-through
 	}
 	/* else if timeout extended */
-	return true, cs.Timer.Expire.Sub(now)
+	expire = timestamp.AtomicLoad(&cs.Timer.Expire)
+	return true, expire.Sub(now)
 }
 
 // Unsafe, must be called w/ locking
@@ -153,7 +156,8 @@ func csTimerStartUnsafe(cs *CallEntry) bool {
 			cs, cs.Timer.timerH)
 		return false
 	}
-	delta := cs.Timer.Expire.Sub(timestamp.Now())
+	expire := timestamp.AtomicLoad(&cs.Timer.Expire)
+	delta := expire.Sub(timestamp.Now())
 	// timer routine
 	err := timers.Add(&cs.Timer.timerH, delta, csTimer, cs)
 	if err != nil {
@@ -225,11 +229,12 @@ const FTimerUpdForce TimerUpdateF = FTimerUpdGT | FTimerUpdLT
 func csTimerUpdateTimeoutUnsafe(cs *CallEntry, after time.Duration,
 	f TimerUpdateF) bool {
 	newExpire := timestamp.Now().Add(after)
+	expire := timestamp.AtomicLoad(&cs.Timer.Expire)
 	if f&FTimerUpdForce != FTimerUpdForce {
-		if f&FTimerUpdGT != 0 && !newExpire.After(cs.Timer.Expire) {
+		if f&FTimerUpdGT != 0 && !newExpire.After(expire) {
 			return true
 		}
-		if f&FTimerUpdLT != 0 && !cs.Timer.Expire.After(newExpire) {
+		if f&FTimerUpdLT != 0 && !expire.After(newExpire) {
 			return true
 		}
 	}
@@ -238,7 +243,7 @@ func csTimerUpdateTimeoutUnsafe(cs *CallEntry, after time.Duration,
 	// bring any performance advantage.
 	// DBG start timer force del always start
 	//if true {
-	if cs.Timer.Expire.After(newExpire) {
+	if expire.After(newExpire) {
 		// DBG stop
 
 		// timeout reduced => have to stop & re-add
@@ -257,7 +262,7 @@ func csTimerUpdateTimeoutUnsafe(cs *CallEntry, after time.Duration,
 			}
 		*/
 		//extra-debugging END
-		cs.Timer.Expire = newExpire // TODO: atomic!
+		timestamp.AtomicStore(&cs.Timer.Expire, newExpire)
 		if csTimerTryStopUnsafe(cs) {
 			// stopping the timer succeeded =>
 			// re-init timer preserving the handle
@@ -291,10 +296,10 @@ func csTimerUpdateTimeoutUnsafe(cs *CallEntry, after time.Duration,
 				"%s\n", buf[:n])
 			WARN("csTimerUpdateTimeoutUnsafe: update timer  failed"+
 				" for call entry %p with %s after\n",
-				buf[:n], cs, after)
+				cs, after)
 		}
 		return false
 	}
-	cs.Timer.Expire = newExpire
+	timestamp.AtomicStore(&cs.Timer.Expire, newExpire)
 	return true
 }
