@@ -106,9 +106,11 @@ func AllocCallEntry(keySize, infoSize uint) *CallEntry {
 			runtime.SetFinalizer(n, func(c *CallEntry) {
 				if c.hashNo != (^uint32(0) - 1) {
 					BUG("Finalizer: non-freed CallEntry about to be "+
-						"garbage collected %p hashNo %x refCnt %x %p key %q:%q:%q\n",
+						"garbage collected %p hashNo %x refCnt %x %p key"+
+						" %q:%q:%q\n",
 						c, c.hashNo, c.refCnt, c.regBinding,
-						c.Key.GetFromTag, c.Key.GetToTag, c.Key.GetCallID())
+						c.Key.GetFromTag(), c.Key.GetToTag(),
+						c.Key.GetCallID())
 				}
 			},
 			)

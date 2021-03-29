@@ -267,7 +267,7 @@ func (lst *RegEntryLst) bugChecks(r *RegEntry, name string, detached bool) bool 
 			trace = true
 			ret = true
 		} else if (r.prev != r && r.prev != nil) || (r.next != r && r.next != nil) {
-			BUG("%s bugChecks(%p (%d), %p): called on ATTACHED element e=%p next=%p prev=%p  for r.hash %d\n", name, lst, lst.bucket, r, r.next, r.prev, r.hashNo)
+			BUG("%s bugChecks(%p (%d), %p): called on ATTACHED element e=%p next=%p prev=%p  for r.hash %d\n", name, lst, lst.bucket, r, r, r.next, r.prev, r.hashNo)
 			trace = true
 			ret = true
 		}
