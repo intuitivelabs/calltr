@@ -112,7 +112,11 @@ func FreeCallEntry(e *CallEntry) {
 	}
 	e.Key.buf = nil
 	e.Info.buf = nil
-	*e = CallEntry{}          // DBG: zero everything
+	cfg := GetCfg()
+	if cfg.Dbg&DbgFAllocs != 0 {
+		//  only if dbg flags ...
+		*e = CallEntry{} // DBG: zero everything
+	}
 	e.hashNo = ^uint32(0) - 1 // DBG: set invalid hash (mark as free'd)
 	CallEntryAllocStats.TotalSize.Dec(uint(totalBufSize) + uint(callEntrySize))
 }
@@ -188,7 +192,11 @@ func FreeRegEntry(e *RegEntry) {
 			e, e.refCnt)
 	}
 	e.buf = nil
-	*e = RegEntry{}           // DBG: zero it to force crashes on re-use w/o alloc
+	cfg := GetCfg()
+	if cfg.Dbg&DbgFAllocs != 0 {
+		//  only if dbg flags ...
+		*e = RegEntry{} // DBG: zero it to force crashes on re-use w/o alloc
+	}
 	e.hashNo = ^uint32(0) - 1 // DBG: set invalid hash
 	RegEntryAllocStats.TotalSize.Dec(uint(totalSize))
 }

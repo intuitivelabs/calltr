@@ -132,7 +132,11 @@ func FreeCallEntry(e *CallEntry) {
 		Log.PANIC("FreeCallEntry called for a referenced entry: %p ref: %d\n",
 			e, e.refCnt)
 	}
-	*e = CallEntry{}          // DBG: zero it
+	cfg := GetCfg()
+	if cfg.Dbg&DbgFAllocs != 0 {
+		//  only if dbg flags ...
+		*e = CallEntry{} // DBG: zero it
+	}
 	e.hashNo = ^uint32(0) - 1 // DBG: set invalid hash
 	CallEntryAllocStats.TotalSize.Dec(uint(totalSize))
 	pbHdr := (*pblockInfo)(unsafe.Pointer(uintptr(unsafe.Pointer(e)) -
@@ -229,7 +233,12 @@ func FreeRegEntry(e *RegEntry) {
 		Log.PANIC("FreeRegEntry called for a referenced entry: %p ref: %d\n",
 			e, e.refCnt)
 	}
-	*e = RegEntry{}           // DBG: zero it to force crashes on re-use w/o alloc
+
+	cfg := GetCfg()
+	if cfg.Dbg&DbgFAllocs != 0 {
+		//  only if dbg flags ...
+		*e = RegEntry{} // DBG: zero it to force crashes on re-use w/o alloc
+	}
 	e.hashNo = ^uint32(0) - 1 // DBG: set invalid hash
 	RegEntryAllocStats.TotalSize.Dec(uint(totalSize))
 	pbHdr := (*pblockInfo)(unsafe.Pointer(uintptr(unsafe.Pointer(e)) -

@@ -7,6 +7,7 @@
 //+build alloc_qmalloc
 //+build !alloc_pool
 //+build !alloc_simple
+//+build !alloc_oneblock
 
 package calltr
 
@@ -30,7 +31,9 @@ func init() {
 
 	// FIXME: better place in function of configured mem maxes
 	mem := make([]byte, 768*1024*1024) // 768MB!
-	qm.Init(mem, 14, qmalloc.QMDefaultOptions)
+	if !qm.Init(mem, 14, qmalloc.QMDefaultOptions) {
+		Log.PANIC("qmalloc Init failed\n")
+	}
 }
 
 // Alloc functions that try to allocate Entry and buffer(s) into one
@@ -97,7 +100,6 @@ func FreeCallEntry(e *CallEntry) {
 	callEntrySize := unsafe.Sizeof(*e)
 	totalSize := callEntrySize + uintptr(cap(e.Key.buf))
 
-	// TODO only if cfg.Dbg&DbgFAllocs != 0 {
 	// sanity checks
 	if len(e.Key.buf) != 0 &&
 		uintptr(unsafe.Pointer(e))+callEntrySize !=
@@ -111,8 +113,10 @@ func FreeCallEntry(e *CallEntry) {
 			e, e.refCnt)
 	}
 
-	// TODO: sanity ony if DbgFalloc
-	*e = CallEntry{}          // DBG: zero it
+	cfg := GetCfg()
+	if cfg.Dbg&DbgFAllocs != 0 {
+		*e = CallEntry{} // DBG: zero it
+	}
 	e.hashNo = ^uint32(0) - 1 // DBG: set invalid hash
 
 	CallEntryAllocStats.TotalSize.Dec(uint(totalSize))
@@ -160,8 +164,6 @@ func AllocRegEntry(bufSize uint) *RegEntry {
 	slice.Len = int(totalSize)
 	slice.Cap = int(totalSize)
 	n := (*RegEntry)(p)
-	//if cfg.Dbg&DbgFAllocs != 0 {
-	//}
 	e.hashNo = ^uint32(0) // DBG: set invalid hash
 	e.pos = 0
 	*n = e // fill with defaults
@@ -189,7 +191,6 @@ func FreeRegEntry(e *RegEntry) {
 	regEntrySize := unsafe.Sizeof(*e)
 	totalSize := regEntrySize + uintptr(cap(e.buf))
 
-	// TODO only if cfg.Dbg&DbgFAllocs != 0 {
 	// sanity checks
 	if len(e.buf) != 0 &&
 		uintptr(unsafe.Pointer(e))+regEntrySize !=
@@ -203,8 +204,10 @@ func FreeRegEntry(e *RegEntry) {
 			e, e.refCnt)
 	}
 
-	// TODO only if cfg.Dbg&DbgFAllocs != 0 {
-	*e = RegEntry{}           // DBG: zero it to force crashes on re-use w/o alloc
+	cfg := GetCfg()
+	if cfg.Dbg&DbgFAllocs != 0 {
+		*e = RegEntry{} // DBG: zero it to force crashes on re-use w/o alloc
+	}
 	e.hashNo = ^uint32(0) - 1 // DBG: set invalid hash
 
 	RegEntryAllocStats.TotalSize.Dec(uint(totalSize))
