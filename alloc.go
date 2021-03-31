@@ -7,6 +7,7 @@
 //+build alloc_simple
 //+build !alloc_pool
 //+build !alloc_oneblock
+//+build !alloc_qmalloc
 
 package calltr
 
@@ -69,7 +70,7 @@ func AllocCallEntry(keySize, infoSize uint) *CallEntry {
 					"garbage collected %p hashNo %x refCnt %x %p"+
 					" key %q:%q:%q\n",
 					c, c.hashNo, c.refCnt, c.regBinding,
-					c.Key.GetFromTag, c.Key.GetToTag, c.Key.GetCallID())
+					c.Key.GetFromTag(), c.Key.GetToTag(), c.Key.GetCallID())
 			}
 		},
 		)
