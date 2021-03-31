@@ -1033,7 +1033,7 @@ func RegEntriesStatsHash(hs *HStats) uint64 {
 	}
 	if hs != nil {
 		hs.Total = total
-		hs.Crt = cstHash.entries.Get()
+		hs.Crt = regHash.entries.Get()
 		hs.Max = max
 		hs.Min = min
 	}
