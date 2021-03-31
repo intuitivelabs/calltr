@@ -7,6 +7,7 @@
 //+build alloc_oneblock
 //+build !alloc_pool
 //+build !alloc_simple
+//+build !alloc_qmalloc
 
 package calltr
 
@@ -32,8 +33,9 @@ var bPool bytespool.Bpool
 func init() {
 	BuildTags = append(BuildTags, AllocTypeName)
 	inUsePlst.Init()
-	// FIXME: check return, size
-	bPool.Init(0, 16384, AllocRoundTo)
+	if !bPool.Init(0, 16384, AllocRoundTo) {
+		Log.PANIC("bytes pool init failed\n")
+	}
 }
 
 // Alloc functions that try to allocate Entry and buffer(s) into one
@@ -62,18 +64,9 @@ func AllocCallEntry(keySize, infoSize uint) *CallEntry {
 		return nil
 	}
 
-	// TODO: use multiple of block-size blocks and pools for each block size
-	//block := make([]byte, totalSize) //?allignment (seems to be always ok)
-	block, _ := bPool.Get(int(totalSize), true) // FIXME: check err, ...
-	/* alternative, forcing allignment, error checking skipped:
-
-	abuf := make([]uint64, (totalSize-1)/unsafe.Sizeof(uint64(1)) +1)
-	// make buf point to the same data as abuf:
-	slice := (*reflect.SliceHeader)(unsafe.Pointer(&buf))
-	slice.Data = uintptr(unsafe.Pointer(&abuf[0]))
-	slice.Lne  = len(abuf)
-	slice.Cap = cap(abuf)
-	*/
+	// use multiple of block-size blocks and pools for each block size
+	// (ignore bool return for now, we could use it for a miss/hit counter)
+	block, _ := bPool.Get(int(totalSize), true)
 	if block == nil {
 		CallEntryAllocStats.Failures.Inc(1)
 		CallEntryAllocStats.TotalSize.Dec(uint(totalSize))
@@ -151,9 +144,7 @@ func FreeCallEntry(e *CallEntry) {
 	slice.Len = int(totalSize) + int(bHdrSize)
 	slice.Cap = int(totalSize) + int(bHdrSize)
 	runtime.KeepAlive(pbHdr)
-	bPool.Put(buf) // FIXME: check
-
-	// TODO: put it back in the corresp. pool
+	bPool.Put(buf) // ignore return (false if size to big for the pool)
 }
 
 // AllocRegEntry allocates a RegEntry and the RegEntry.buf in one block.
@@ -184,18 +175,10 @@ func AllocRegEntry(bufSize uint) *RegEntry {
 		return nil
 	}
 
-	// TODO: use multiple of block-size blocks and pools for each block size
-	//block := make([]byte, totalSize) //?allignment (seems to be always ok)
-	block, _ := bPool.Get(int(totalSize), true) // FIXME: check err, ...
-	/* alternative, forcing allignment, error checking skipped:
+	// use multiple of block-size blocks and pools for each block size
+	// (ignore bool return for now, we could use it for a miss/hit counter)
+	block, _ := bPool.Get(int(totalSize), true)
 
-	abuf := make([]uint64, (totalSize-1)/unsafe.Sizeof(uint64(1)) +1)
-	// make buf point to the same data as abuf:
-	slice := (*reflect.SliceHeader)(unsafe.Pointer(&buf))
-	slice.Data = uintptr(unsafe.Pointer(&abuf[0]))
-	slice.Lne  = len(abuf)
-	slice.Cap = cap(abuf)
-	*/
 	if block == nil {
 		RegEntryAllocStats.Failures.Inc(1)
 		RegEntryAllocStats.TotalSize.Dec(uint(totalSize))
@@ -206,13 +189,10 @@ func AllocRegEntry(bufSize uint) *RegEntry {
 	buf := block[bHdrSize:]
 	n := (*RegEntry)(unsafe.Pointer(&buf[0]))
 	//if cfg.Dbg&DbgFAllocs != 0 {
-	//runtime.SetFinalizer(n, func(p *RegEntry) { DBG("Finalizer RegEntry(%p)\n", p) })
-	//runtime.SetFinalizer(&buf[0], func(p unsafe.Pointer) { DBG("Finalizer &buf[0](%p)\n", p) })
-	//runtime.SetFinalizer(&buf, func(p *[]byte) { DBG("Finalizer buf[](%p)\n", p) })
+	//runtime.SetFinalizer(&block[0], func(p unsafe.Pointer) { DBG("Finalizer &buf[0](%p)\n", p) })
 	//}
 	e.hashNo = ^uint32(0) // DBG: set invalid hash
 	e.pos = 0
-	//n := &e // quick HACK
 	*n = e
 	n.buf = buf[regEntrySize:]
 	// poolno -1 used for 0 allocs and poolno > len(poolBuffs) for big allocs
@@ -261,6 +241,5 @@ func FreeRegEntry(e *RegEntry) {
 	slice.Len = int(totalSize) + int(bHdrSize)
 	slice.Cap = int(totalSize) + int(bHdrSize)
 	runtime.KeepAlive(pbHdr)
-	bPool.Put(buf) // FIXME: check
-	// TODO: put it back in the corresp. pool
+	bPool.Put(buf) // ignore return (false if not put back because sz too big)
 }
