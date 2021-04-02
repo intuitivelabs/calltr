@@ -173,7 +173,7 @@ func csTimerStartUnsafe(cs *CallEntry) bool {
 // removed.
 // must be called with corresp. hash lock held.
 func csTimerTryStopUnsafe(cs *CallEntry) bool {
-	if cs.Timer.timerH.Detached() || atomic.LoadInt32(&cs.Timer.done) != 0 {
+	if atomic.LoadInt32(&cs.Timer.done) != 0 {
 		// already removed or expired by its own
 		return true // it's stopped for sure
 	}
@@ -193,8 +193,6 @@ func csTimerTryStopUnsafe(cs *CallEntry) bool {
 	// be done outside this function (which is not supposed to have as
 	// possible side-efect unlocking the hash and possibly making the
 	// current call entry invalid).
-	// TODO: revisit, for wtimer: some of this is obsolete. We could
-	// make sure cs is ref, unlock and DelWait() on it.
 	//
 	// NOTE: wtimer Del() will now mark the timer for termination if it's
 	// running (if it cannot be deleted immediately), however this is
@@ -205,11 +203,19 @@ func csTimerTryStopUnsafe(cs *CallEntry) bool {
 	// timer immediately or TryDel() which will not remove the timer if
 	// it's running (will allow extending it from the timeout handler).
 
-	//  either DelTry() or DelWait() should work. Theoretically
-	// DelTry() should be a bit better in the unlikely case in which we
-	// try to delete a running timer handle and  that handle is slow
-	// (DelWait() will spin-wait on it), but more testing is needed.
-	//ret, err := timers.DelWait(&cs.Timer.timerH)
+	//  DelWait() will not work here, without changes: DelWait()
+	// will introduce a possible deadlock if the corresp. hash lock is held
+	// by the caller of this function (the current timer handler will try
+	// to get the corresp. hash bucket lock and if DelWait() spins waiting
+	// for the handler to finish and the handler waits on the hashlock
+	// => deadlock!).
+	// Theoretically DelTry() should be a bit better anyway, in the
+	// unlikely case in which we try to delete a running timer handle and
+	// that handle is slow (DelWait() would spin-wait on it).
+	// Switching to DelWait() is possible only if we make sure we don't
+	// hold the hash bucket lock (e.g. if DelTry() fails, extra ref(callentry);
+	// unlock(hash bucket lock); DelWait(); unref(callentry))
+
 	ret, err := timers.DelTry(&cs.Timer.timerH)
 	if err != nil {
 		ERR("timer Del for %p returned %v, %q\n", cs, ret, err)
@@ -270,7 +276,7 @@ func csTimerUpdateTimeoutUnsafe(cs *CallEntry, after time.Duration,
 			cs.Timer.Expire = timestamp.Now().Add(after)
 			if err := timers.Reset(&cs.Timer.timerH, timersFlags); err != nil {
 				BUG("csTimerUpdateTimeoutUnsafe: reset active timer after"+
-					" stop failed for call entry %p: delta: %s %s\n",
+					" stop failed for call entry %p: delta: %s: %s\n",
 					cs, after, err)
 				// try desperate recovery measures
 				timers.DelWait(&cs.Timer.timerH)
