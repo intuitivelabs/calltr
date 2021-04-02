@@ -25,14 +25,22 @@ const AllocType = AllocOneBlock  // build time alloc type
 const AllocTypeName = "oneblock" // alloc type as string
 const AllocCallsPerEntry = 1     // how many allocs for a CallEntry+buf
 
-// pointers to in-use allocated blocks, needed to keep then out of GC reach
+// pointers to in-use allocated blocks, needed to keep them out of GC reach
+// (see alloc_plist comments)
 var inUsePlst pUsedLst
 
+// Use different size pools for allocating memory.
+// Each of the common block sizes will get its own pool
+// (block sizes are always rounded to AllocRoundTo).
+// bytespool.Bpool uses one sync.Pool for each distinct memory block size.
 var bPool bytespool.Bpool
 
 func init() {
 	BuildTags = append(BuildTags, AllocTypeName)
 	inUsePlst.Init()
+	// init the bytespool with minimum size of 0 and a maximum size of
+	// 16kb of blocks in sizes multiple of AllocRoundTo
+	// (16kb/AllocRoundTo different pools will be created)
 	if !bPool.Init(0, 16384, AllocRoundTo) {
 		Log.PANIC("bytes pool init failed\n")
 	}
@@ -44,8 +52,6 @@ func init() {
 // AllocCallEntry allocates a CallEntry and the CalLEntry.Key.buf in one block.
 // The Key.buf will be keySize bytes length and info.buf infoSize.
 // It might return nil if the memory limits are exceeded.
-// Note: disabled for now, see AllocRegEntry note about interaction
-// with the GC.
 func AllocCallEntry(keySize, infoSize uint) *CallEntry {
 	var e CallEntry
 	CallEntryAllocStats.NewCalls.Inc(1)
@@ -72,6 +78,11 @@ func AllocCallEntry(keySize, infoSize uint) *CallEntry {
 		CallEntryAllocStats.TotalSize.Dec(uint(totalSize))
 		return nil
 	}
+	// memory block structure:
+	// | pblockInfo | CallEntry | CallEntry.Key | CallEntry.Info |
+	// pblockInfo contains the information needed to remove the block for
+	// the inUsePlst  (on Free). inUsePlst is used to keep the blocks from
+	// being GCed.
 	bHdr := (*pblockInfo)(unsafe.Pointer(&block[0]))
 	*bHdr = inUsePlst.Add(unsafe.Pointer(&block[0]))
 	buf := block[bHdrSize:]
@@ -113,7 +124,7 @@ func AllocCallEntry(keySize, infoSize uint) *CallEntry {
 
 }
 
-// FreeCallEntry frees a CallEntry allocated with NewCallEntry.
+// FreeCallEntry frees a CallEntry allocated with AllocCallEntry.
 func FreeCallEntry(e *CallEntry) {
 	bHdrSize := uint(unsafe.Sizeof(pblockInfo{})) // block hdr.
 
@@ -125,7 +136,7 @@ func FreeCallEntry(e *CallEntry) {
 		uintptr(unsafe.Pointer(e))+callEntrySize !=
 			uintptr(unsafe.Pointer(&e.Key.buf[0])) {
 		Log.PANIC("FreeCallEntry called with call entry not allocated"+
-			" with NewCallEntry: %p (sz: %x), buf %p\n",
+			" with AllocCallEntry: %p (sz: %x), buf %p\n",
 			e, callEntrySize, &e.Key.buf[0])
 	}
 	if v := atomic.LoadInt32(&e.refCnt); v != 0 {
@@ -139,8 +150,11 @@ func FreeCallEntry(e *CallEntry) {
 	}
 	e.hashNo = ^uint32(0) - 1 // DBG: set invalid hash
 	CallEntryAllocStats.TotalSize.Dec(uint(totalSize))
+	// memory block structure:
+	// | pblockInfo | CallEntry | CallEntry.Key | CallEntry.Info |
 	pbHdr := (*pblockInfo)(unsafe.Pointer(uintptr(unsafe.Pointer(e)) -
 		uintptr(bHdrSize)))
+	// remove it from the inUsePlst
 	inUsePlst.Rm(*pbHdr)
 	var buf []byte
 	slice := (*reflect.SliceHeader)(unsafe.Pointer(&buf))
@@ -148,20 +162,13 @@ func FreeCallEntry(e *CallEntry) {
 	slice.Len = int(totalSize) + int(bHdrSize)
 	slice.Cap = int(totalSize) + int(bHdrSize)
 	runtime.KeepAlive(pbHdr)
+	// put it back in the pool
 	bPool.Put(buf) // ignore return (false if size to big for the pool)
 }
 
 // AllocRegEntry allocates a RegEntry and the RegEntry.buf in one block.
 // The RegEntry.buf will be bufSize bytes length.
 // It might return nil if the memory limits are exceeded.
-// Note: disabled for now, it looks like aliasing a []byte block via
-// unsafe.Pointer to RegEntry* is not supported by the garbage collector and
-// pointer inisde the RegEntry* alias are not taken into account when
-// performin GC => RegEntry which are not at the list head appear as
-// unreferenced (since they are ref'ed only from other RegEntry next & prev
-// which are not seen by GC) => they might be freed "under us".
-// Solution: use C.malloc() or custom malloc and make sure no pointer
-// inside a RegEntry references any go alloc. stuff (since it won't be seen by GC).
 func AllocRegEntry(bufSize uint) *RegEntry {
 	var e RegEntry
 	bHdrSize := uint(unsafe.Sizeof(pblockInfo{})) // block hdr.
@@ -188,6 +195,11 @@ func AllocRegEntry(bufSize uint) *RegEntry {
 		RegEntryAllocStats.TotalSize.Dec(uint(totalSize))
 		return nil
 	}
+	// memory block structure:
+	// | pblockInfo | RegEntry | RegEntry.buf |
+	// pblockInfo contains the information needed to remove the block for
+	// the inUsePlst  (on Free). inUsePlst is used to keep the blocks from
+	// being GCed.
 	bHdr := (*pblockInfo)(unsafe.Pointer(&block[0]))
 	*bHdr = inUsePlst.Add(unsafe.Pointer(&block[0]))
 	buf := block[bHdrSize:]
@@ -241,8 +253,11 @@ func FreeRegEntry(e *RegEntry) {
 	}
 	e.hashNo = ^uint32(0) - 1 // DBG: set invalid hash
 	RegEntryAllocStats.TotalSize.Dec(uint(totalSize))
+	// memory block structure:
+	// | pblockInfo | RegEntry | RegEntry.buf |
 	pbHdr := (*pblockInfo)(unsafe.Pointer(uintptr(unsafe.Pointer(e)) -
 		uintptr(bHdrSize)))
+	// remove it from the inUsePlst
 	inUsePlst.Rm(*pbHdr)
 	var buf []byte
 	slice := (*reflect.SliceHeader)(unsafe.Pointer(&buf))
@@ -250,5 +265,6 @@ func FreeRegEntry(e *RegEntry) {
 	slice.Len = int(totalSize) + int(bHdrSize)
 	slice.Cap = int(totalSize) + int(bHdrSize)
 	runtime.KeepAlive(pbHdr)
+	// put it back in the pool
 	bPool.Put(buf) // ignore return (false if not put back because sz too big)
 }
