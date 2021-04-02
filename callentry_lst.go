@@ -54,7 +54,7 @@ func (h *CallEntryHash) Init(sz int) {
 		{&h.cnts.hFailLimEx, 0, nil, nil, "fail_lim",
 			"new call entry creation attempt exceeded entries limit"},
 		{&h.cnts.hActive, counters.CntMaxF, nil, nil, "active",
-			"active tracked calls"},
+			"current total tracked entries"},
 	}
 	entries := 50 // extra space to allow registering more counters
 	if entries < len(callsCntDefs) {
