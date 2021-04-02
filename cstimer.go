@@ -309,3 +309,50 @@ func csTimerUpdateTimeoutUnsafe(cs *CallEntry, after time.Duration,
 	timestamp.AtomicStore(&cs.Timer.Expire, newExpire)
 	return true
 }
+
+// MinTimeout returns the minimum timeout value for a call entry.
+func MinTimeout() time.Duration {
+	return timers.Duration(wtimer.NewTicks(1))
+}
+
+// ForceAllTimeout forces quick expire for all the call entries
+// in the hash table (use on controlled shutdown only).
+// Returns number of forced timeout entries, the
+// number of loops over the whole hash and the total number of entries walked
+// (for debugging).
+func ForceAllTimeout(after time.Duration) (int, int, int) {
+
+	forced := 0
+	loops := 0
+	n := 0
+	for {
+		running := 0
+		for i := 0; i < len(cstHash.HTable); i++ {
+			lst := &cstHash.HTable[i]
+			lst.Lock()
+			for e := lst.head.next; e != &lst.head; e = e.next {
+				n++
+				if e.Timer.timerH.Intvl() > after {
+					// update all timeouts to "after", but only if after is before
+					// the current expire timeout
+					if !csTimerUpdateTimeoutUnsafe(e, after, FTimerUpdLT) {
+						// running timer, update timeout might have failed (race)
+						// => retry
+						running++
+					} else {
+						forced++
+					}
+				}
+			}
+			lst.Unlock()
+		}
+		loops++
+		if running == 0 {
+			// no more retries, no timer updates failed
+			break
+		}
+		// retry
+		runtime.Gosched()
+	}
+	return forced, loops, n
+}

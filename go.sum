@@ -15,9 +15,7 @@ github.com/intuitivelabs/slog v0.0.1/go.mod h1:Ui5r7QQoGGj6/sODBbsz8VJbbylXyx86a
 github.com/intuitivelabs/slog v0.0.2-0.20210309182339-ec06449a2183/go.mod h1:Ui5r7QQoGGj6/sODBbsz8VJbbylXyx86aVhbdoriIKY=
 github.com/intuitivelabs/slog v0.0.2-0.20210321224300-46645dc5b0ce h1:/t9HSsqcGXH38EoIcAkxUyzZK7LwX5O/DvDa7ZXI7/E=
 github.com/intuitivelabs/slog v0.0.2-0.20210321224300-46645dc5b0ce/go.mod h1:Ui5r7QQoGGj6/sODBbsz8VJbbylXyx86aVhbdoriIKY=
-github.com/intuitivelabs/timestamp v0.0.2 h1:O9PwhXIlDa7o1CNf50jS4l4jVlwcbZS3A7GoiB3AUEA=
-github.com/intuitivelabs/timestamp v0.0.2/go.mod h1:g6iXgcaQTyNvYhRewLj5li0dhUBrlm0ibApJTklqoXU=
 github.com/intuitivelabs/timestamp v0.0.3-0.20210323191703-3e5e3588bfd0 h1:bdYMxrF4gbMg7G+Hmf5EXE350jFv0JG3fX7qjIdK050=
 github.com/intuitivelabs/timestamp v0.0.3-0.20210323191703-3e5e3588bfd0/go.mod h1:g6iXgcaQTyNvYhRewLj5li0dhUBrlm0ibApJTklqoXU=
-github.com/intuitivelabs/wtimer v0.0.0-20210323185108-b4c23c793461 h1:n1kmdyfLDeT3Dj8AxHE1u9cBZkD+hgMH7A4je/B9N9M=
-github.com/intuitivelabs/wtimer v0.0.0-20210323185108-b4c23c793461/go.mod h1:sYoej7UZrEqJXG4Kaed7WB5tZ3NUn7xS6Ob8wDvijr0=
+github.com/intuitivelabs/wtimer v0.0.0-20210331082615-cfe7b31ba000 h1:SJIPEvXUGJ/yfTJ5WlEZ4F/+DMzevqvbU4cz16CdRNs=
+github.com/intuitivelabs/wtimer v0.0.0-20210331082615-cfe7b31ba000/go.mod h1:q9vUPOa1F3yiqOXZJTPtdZ0AX/Cy51cA5O2/kxQxDMo=
