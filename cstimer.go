@@ -10,210 +10,161 @@ import (
 	"runtime"
 	"sync/atomic"
 	"time"
-	"unsafe"
 
 	"github.com/intuitivelabs/timestamp"
+	"github.com/intuitivelabs/wtimer"
 )
+
+// timer wheel
+var timers wtimer.WTimer
+
+const timersFlags = 0                    //wtimer.Ffast //wtimer.FgoR
+const timerTick = 100 * time.Millisecond // timer tick length
+
+// init the timer wheel
+func initTimers() {
+	// tick values should not be too low (lower then 50ms). The
+	// timer expire error is +/- tick most of the time, but it maxes
+	// out to 1 tick + 20ms (max scheduling latency is around 20ms)
+	//
+	// Low tick values would increase CPU usage when idle, but seem to have
+	// little performance impact under load.
+
+	if err := timers.Init(timerTick); err != nil {
+		Log.PANIC("timers init failed: %s\n", err)
+	}
+	timers.Start()
+}
+
+// TODO: add calltr.Destroy() that would call stopTimers()
+func stopTimers() {
+	// stop all the timer goroutines and wait for them to finish
+	timers.Shutdown()
+	// the timers should be unlinked from CallEntryHash.Destroy() which
+	// should be called after timers.Shutdown() (or before but than changed
+	// to use DelWait() for the timers).
+}
 
 // timers and timer related functions
 type TimerInfo struct {
 	Expire timestamp.TS
-	Handle *time.Timer
-	done   int32 // terminated timers set this to 1
-	// TODO: eg. expire, timer handle, list connector ...
-}
 
-/*
-func (t *TimerInfo) UpdateSec(s int64) {
-	t.Update(time.Duration(s) * time.Second)
+	timerH wtimer.TimerLnk
+	// TODO: review done use, most likely not need with wtimer
+	done int32 // terminated timers set this to 1
 }
-
-// Unsafe, must be called w/ locking
-func (t *TimerInfo) Update(after time.Duration) {
-	newExpire := timestamp.Now().Add(after)
-	if newExpire.Before(t.Expire) {
-		// have to delete and re-add the timer
-	}
-	// else extend expire
-	t.Expire = newExpire
-}
-*/
-
-func (t *TimerInfo) Init(after time.Duration) {
-	t.Expire = timestamp.Now().Add(after)
-	t.Handle = nil
-	t.done = 0
-}
-
-// returns true if the timer was stopped, false if it expired or was already
-// removed.
-func (t *TimerInfo) TryStop() bool {
-	h := t.Handle
-	if h == nil || atomic.LoadInt32(&t.done) != 0 {
-		// already removed or expired by its own
-		return true // it's stopped for sure
-	}
-	// try to stop the timer. If Stop fails it means the timer might
-	// be either expired, running or already removed.
-	// Since nobody else is supposed to remove the timer and start/stop
-	// races are not supposed to happen it means the timer cannot be
-	// already removed at this point =>  expired or running
-	// However if it already expired it would remove the call entry from
-	// the hash => not reachable (before trying to remove the timer
-	// one should always check if the entry is still in the hash)
-	// => the only possibility is the timer is running now.
-	// There's not much we ca do in this case: we cannot wait for it to finish
-	// because we would deadlock on the hash lock (which the timer tries to
-	// acquire). We could unlock, runtime.Gosched(), lock again, check if
-	// entry still in the hash and retry stopping the timer, but this should
-	// be done outside this function (which is not supposed to have as
-	// possible side-efect unlocking the hash and possibly making the
-	// current call entry invalid).
-	return h.Stop()
-}
-
-// updates timeout if allowed by the flags (f) and possible.
-func (t *TimerInfo) UpdateTimeout(after time.Duration, f TimerUpdateF) bool {
-	newExpire := timestamp.Now().Add(after)
-	if f&FTimerUpdForce != FTimerUpdForce {
-		if f&FTimerUpdGT != 0 && !newExpire.After(t.Expire) {
-			return true
-		}
-		if f&FTimerUpdLT != 0 && !t.Expire.After(newExpire) {
-			return true
-		}
-	}
-	if t.Expire.After(newExpire) {
-		// timeout reduced => have to stop & re-add
-		t.Expire = newExpire
-		if t.TryStop() {
-			// re-init timer preserving the handle
-			t.done = 0
-			t.Expire = timestamp.Now().Add(after)
-			if t.Handle.Reset(after) {
-				WARN("UpdateTimeout: reset active timer  failed"+
-					" for timer entry %p: %v\n", t, *t)
-			}
-			return true
-		}
-		// stop failed, means the timer is running now => update failed
-		WARN("UpdateTimeout: update timer  failed"+
-			" for timer entry %p: %v with %d ns\n", t, *t, after)
-		return false
-	}
-	t.Expire = newExpire
-	return true
-}
-
-// Start timer. Returns fails if fails. Take as parameter a timer handler
-// function.
-func (t *TimerInfo) Start(f func()) bool {
-	handleAddr := (*unsafe.Pointer)(unsafe.Pointer(&t.Handle))
-	// sanity checks
-	if atomic.LoadPointer(handleAddr) != nil ||
-		atomic.LoadInt32(&t.done) != 0 {
-		Log.PANIC("TimerInfo.Start() called with un-init timer %p : %v\n",
-			t, *t)
-		return false
-	}
-	// timer routine
-	h := time.AfterFunc(t.Expire.Sub(timestamp.Now()), f)
-	if h == nil {
-		return false
-	}
-	atomic.StorePointer(handleAddr, unsafe.Pointer(h))
-	return true
-}
-
-// TODO: use TimerInfo.* inside csTimer*
 
 func csTimerInitUnsafe(cs *CallEntry, after time.Duration) {
 	cs.Timer.Expire = timestamp.Now().Add(after)
-	cs.Timer.Handle = nil
 	cs.Timer.done = 0
+	if err := timers.InitTimer(&cs.Timer.timerH, timersFlags); err != nil {
+		Log.PANIC("failed timer init for call entry %p timeout %s : %s\n",
+			cs, after, err)
+	}
+}
+
+// csTimer is the main timeout handle function for the CallEntry.
+// It must be of the wtimer.TimerHandleF type, since it is registered
+// as a callback for a wtimer timer.
+// The parameters are:
+//  wt - timer wheel pointer (needed for all the operations on timers)
+//  h -  timer handler (pointer to the TimerLnk structure used for the
+//        timer)
+//  ce   - opaque callback parameters, in our case it will always be
+//         the CallEntry that own the timer.
+// It returns true and new interval to extend the timer or false to stop
+// it immediately (e.g. after freeing it inside the callback)
+func csTimer(wt *wtimer.WTimer, h *wtimer.TimerLnk,
+	ce interface{}) (bool, time.Duration) {
+	cs := ce.(*CallEntry)
+	now := timestamp.Now()
+	// allow for small errors
+	cstHash.HTable[cs.hashNo].Lock()
+	// TODO: atomic
+	expire := timestamp.AtomicLoad(&cs.Timer.Expire)
+	expire = expire.Add(-time.Second / 10) // sub sec/10
+	cstHash.HTable[cs.hashNo].Unlock()
+
+	/* DBG start timer drift  -- TODO: add some counters
+	target := timestamp.AtomicLoad(&cs.Timer.Expire)
+	if target.After(now) &&
+		target.Sub(now) > 1*timerTick {
+	} else if target.Before(now) &&
+		now.Sub(target) > 2*timerTick {
+	}
+	 DBG end */
+
+	if expire.Before(now) || expire.Equal(now) {
+		var src, dst NetInfo
+		ev := EvNone
+		var evd *EventData
+		if cs.evHandler != nil {
+			evd = &EventData{}
+			buf := make([]byte, EventDataMaxBuf())
+			evd.Init(buf)
+		}
+		// if expired remove cs from hash
+		cstHash.HTable[cs.hashNo].Lock()
+		removed := false
+		// check again, in case we are racing with an Update
+		expire = timestamp.AtomicLoad(&cs.Timer.Expire)
+		expire = expire.Add(-time.Second / 10) // sub sec/10
+		if expire.Before(now) || expire.Equal(now) {
+			// remove from the hashes, but still keep a ref.
+			removed = unlinkCallEntryUnsafe(cs, false)
+			atomic.StoreInt32(&cs.Timer.done, 1) // obsolete since wtimer?
+			ev = finalTimeoutEv(cs)
+			if ev != EvNone && evd != nil {
+				// event not seen before, report...
+				// fill event data while locked, but process it
+				// once unlocked
+				evd.Fill(ev, cs)
+			}
+		}
+		if removed {
+			src = cs.EndPoint[0]
+			dst = cs.EndPoint[1]
+		}
+		cstHash.HTable[cs.hashNo].Unlock()
+		// mark timer as dead/done
+		if removed {
+			// call event callback, outside the hash lock
+			if ev != EvNone {
+				if evd != nil && cs.evHandler != nil { // TODO: obsolete
+					cs.evHandler(evd)
+				}
+				if cEvHandler != nil {
+					cEvHandler(ev, cs, src, dst)
+				}
+			}
+			cs.Unref()
+			return false, 0 // end timer
+		} // else fall-through
+	}
+	/* else if timeout extended */
+	expire = timestamp.AtomicLoad(&cs.Timer.Expire)
+	return true, expire.Sub(now)
 }
 
 // Unsafe, must be called w/ locking
 // csTimerInit must be called first
 func csTimerStartUnsafe(cs *CallEntry) bool {
 
-	handleAddr := (*unsafe.Pointer)(unsafe.Pointer(&cs.Timer.Handle))
-
-	callstTimer := func() {
-		now := timestamp.Now()
-		// allow for small errors
-		cstHash.HTable[cs.hashNo].Lock()
-		expire := cs.Timer.Expire.Add(-time.Second / 10) // sub sec/10
-		cstHash.HTable[cs.hashNo].Unlock()
-		if expire.Before(now) || expire.Equal(now) {
-			var src, dst NetInfo
-			ev := EvNone
-			var evd *EventData
-			if cs.evHandler != nil {
-				evd = &EventData{}
-				buf := make([]byte, EventDataMaxBuf())
-				evd.Init(buf)
-			}
-			// if expired remove cs from hash
-			cstHash.HTable[cs.hashNo].Lock()
-			removed := false
-			// check again, in case we are racing with an Update
-			expire := cs.Timer.Expire.Add(-time.Second / 10) // sub sec/10
-			if expire.Before(now) || expire.Equal(now) {
-				// remove from the hashes, but still keep a ref.
-				removed = unlinkCallEntryUnsafe(cs, false)
-				atomic.StoreInt32(&cs.Timer.done, 1)
-				ev = finalTimeoutEv(cs)
-				if ev != EvNone && evd != nil {
-					// event not seen before, report...
-					// fill event data while locked, but process it
-					// once unlocked
-					evd.Fill(ev, cs)
-				}
-			}
-			if removed {
-				src = cs.EndPoint[0]
-				dst = cs.EndPoint[1]
-			}
-			cstHash.HTable[cs.hashNo].Unlock()
-			// mark timer as dead/done
-			if removed {
-				// call event callback, outside the hash lock
-				if ev != EvNone {
-					if evd != nil && cs.evHandler != nil { // TODO: obsolete
-						cs.evHandler(evd)
-					}
-					if cEvHandler != nil {
-						cEvHandler(ev, cs, src, dst)
-					}
-				}
-				cs.Unref()
-				return
-			} // else fall-through
-		}
-		/* else if timeout extended reset timer */
-		// make sure the timer is set, before executing
-		for atomic.LoadPointer(handleAddr) == nil {
-			runtime.Gosched()
-		}
-		cstHash.HTable[cs.hashNo].Lock()
-		cs.Timer.Handle.Reset(cs.Timer.Expire.Sub(now))
-		cstHash.HTable[cs.hashNo].Unlock()
-	}
-
 	// sanity checks
-	if atomic.LoadPointer(handleAddr) != nil ||
-		atomic.LoadInt32(&cs.Timer.done) != 0 {
+	if atomic.LoadInt32(&cs.Timer.done) != 0 || !cs.Timer.timerH.Detached() {
 		Log.PANIC("csTimerStart called with un-init timer %p : %v\n",
-			cs, *cs)
+			cs, cs.Timer.timerH)
 		return false
 	}
+	expire := timestamp.AtomicLoad(&cs.Timer.Expire)
+	delta := expire.Sub(timestamp.Now())
 	// timer routine
-	h := time.AfterFunc(cs.Timer.Expire.Sub(timestamp.Now()), callstTimer)
-	if h == nil {
+	err := timers.Add(&cs.Timer.timerH, delta, csTimer, cs)
+	if err != nil {
+		Log.PANIC("timers.Add failed for cs %p, delta %s : %s\n",
+			cs, delta, err)
 		return false
 	}
-	atomic.StorePointer(handleAddr, unsafe.Pointer(h))
 
 	return true
 }
@@ -222,13 +173,12 @@ func csTimerStartUnsafe(cs *CallEntry) bool {
 // removed.
 // must be called with corresp. hash lock held.
 func csTimerTryStopUnsafe(cs *CallEntry) bool {
-	h := cs.Timer.Handle
-	if h == nil || atomic.LoadInt32(&cs.Timer.done) != 0 {
+	if cs.Timer.timerH.Detached() || atomic.LoadInt32(&cs.Timer.done) != 0 {
 		// already removed or expired by its own
 		return true // it's stopped for sure
 	}
 	// try to stop the timer. If Stop fails it means the timer might
-	// be either expired, running or already removed.
+	// be running
 	// Since nobody else is supposed to remove the timer and start/stop
 	// races are not supposed to happen it means the timer cannot be
 	// already removed at this point =>  expired or running
@@ -243,7 +193,28 @@ func csTimerTryStopUnsafe(cs *CallEntry) bool {
 	// be done outside this function (which is not supposed to have as
 	// possible side-efect unlocking the hash and possibly making the
 	// current call entry invalid).
-	return h.Stop()
+	// TODO: revisit, for wtimer: some of this is obsolete. We could
+	// make sure cs is ref, unlock and DelWait() on it.
+	//
+	// NOTE: wtimer Del() will now mark the timer for termination if it's
+	// running (if it cannot be deleted immediately), however this is
+	// _not_ the behaviour that our current timer handler assumes
+	// (it will self-extend it's lifetime using Expires). However since a
+	// running timer will be effectively stopped by Del() and not re-added
+	// => leaks. One has to use either DelWait() which will always remove the
+	// timer immediately or TryDel() which will not remove the timer if
+	// it's running (will allow extending it from the timeout handler).
+
+	//  either DelTry() or DelWait() should work. Theoretically
+	// DelTry() should be a bit better in the unlikely case in which we
+	// try to delete a running timer handle and  that handle is slow
+	// (DelWait() will spin-wait on it), but more testing is needed.
+	//ret, err := timers.DelWait(&cs.Timer.timerH)
+	ret, err := timers.DelTry(&cs.Timer.timerH)
+	if err != nil {
+		ERR("timer Del for %p returned %v, %q\n", cs, ret, err)
+	}
+	return ret
 }
 
 type TimerUpdateF uint8
@@ -258,15 +229,23 @@ const FTimerUpdForce TimerUpdateF = FTimerUpdGT | FTimerUpdLT
 func csTimerUpdateTimeoutUnsafe(cs *CallEntry, after time.Duration,
 	f TimerUpdateF) bool {
 	newExpire := timestamp.Now().Add(after)
+	expire := timestamp.AtomicLoad(&cs.Timer.Expire)
 	if f&FTimerUpdForce != FTimerUpdForce {
-		if f&FTimerUpdGT != 0 && !newExpire.After(cs.Timer.Expire) {
+		if f&FTimerUpdGT != 0 && !newExpire.After(expire) {
 			return true
 		}
-		if f&FTimerUpdLT != 0 && !cs.Timer.Expire.After(newExpire) {
+		if f&FTimerUpdLT != 0 && !expire.After(newExpire) {
 			return true
 		}
 	}
-	if cs.Timer.Expire.After(newExpire) {
+	// NOTE: the remove/update timer only if expire increased is not
+	// needed anymore (since using wtimer). It doesn't seem to
+	// bring any performance advantage.
+	// DBG start timer force del always start
+	//if true {
+	if expire.After(newExpire) {
+		// DBG stop
+
 		// timeout reduced => have to stop & re-add
 		// extra-debugging for REGISTER
 		/*
@@ -283,29 +262,44 @@ func csTimerUpdateTimeoutUnsafe(cs *CallEntry, after time.Duration,
 			}
 		*/
 		//extra-debugging END
-		cs.Timer.Expire = newExpire
+		timestamp.AtomicStore(&cs.Timer.Expire, newExpire)
 		if csTimerTryStopUnsafe(cs) {
+			// stopping the timer succeeded =>
 			// re-init timer preserving the handle
 			cs.Timer.done = 0
 			cs.Timer.Expire = timestamp.Now().Add(after)
-			if cs.Timer.Handle.Reset(after) {
-				WARN("csTimerUpdateTimeoutUnsafe: reset active timer failed"+
-					" for call entry %p: %v\n", cs, *cs)
+			if err := timers.Reset(&cs.Timer.timerH, timersFlags); err != nil {
+				BUG("csTimerUpdateTimeoutUnsafe: reset active timer after"+
+					" stop failed for call entry %p: delta: %s %s\n",
+					cs, after, err)
+				// try desperate recovery measures
+				timers.DelWait(&cs.Timer.timerH)
+				timers.Reset(&cs.Timer.timerH, timersFlags)
+			}
+			if err := timers.Add(&cs.Timer.timerH, after,
+				csTimer, cs); err != nil {
+				BUG("timers.Add failed for cs %p, delta %s : %s\n",
+					cs, after, err)
+				return false
 			}
 			return true
 		}
 		// stop failed, means the timer is running now => update failed
+		// NOTE: we could wait for it with timers.DelWait() or leave it
+		// race (since we have the fallback Expire set)
+		// FIXME: left a warning for now to see how often is encountered
+		// TODO: replace with a counter
 		if WARNon() {
 			var buf [1024]byte
 			n := runtime.Stack(buf[:], false)
 			WARN("csTimerUpdateTimeoutUnsafe: update timer  failed: backtrace:\n"+
 				"%s\n", buf[:n])
 			WARN("csTimerUpdateTimeoutUnsafe: update timer  failed"+
-				" for call entry %p: %v with %s after\n",
-				buf[:n], cs, *cs, after)
+				" for call entry %p with %s after\n",
+				cs, after)
 		}
 		return false
 	}
-	cs.Timer.Expire = newExpire
+	timestamp.AtomicStore(&cs.Timer.Expire, newExpire)
 	return true
 }

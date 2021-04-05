@@ -57,6 +57,7 @@ var regHash RegEntryHash
 func init() {
 	cstHash.Init(HashSize)
 	regHash.Init(HashSize)
+	initTimers()
 }
 
 // SetCfg sets a new global config for calltr.
@@ -716,8 +717,8 @@ endLocked:
 				BUG("calltr.ProcessMsg: empty aor (%q) or contact(%q) for %p:"+
 					" ev %d (%q last %q prev) state %q (%q) prev msgs %q "+
 					"cid %q msg:\n%q\n",
-					aor, contact, int(ev), ev.String(),
-					e.crtEv.String(), e.lastEv.String(),
+					aor, contact, e, int(ev), ev.String(),
+					e.lastEv.String(),
 					e.State.String(), e.prevState.String(),
 					e.lastMsgs.String(),
 					e.Key.GetCallID(), m.Buf)
