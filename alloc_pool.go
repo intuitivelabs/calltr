@@ -4,7 +4,7 @@
 // that can be found in the LICENSE.txt file in the root of the source
 // tree.
 
-//+build alloc_pool default !alloc_simple,!alloc_oneblock
+//+build alloc_pool default !alloc_simple,!alloc_oneblock,!alloc_qmalloc
 
 package calltr
 
@@ -155,7 +155,12 @@ func FreeCallEntry(e *CallEntry) {
 	}
 	e.Key.buf = nil
 	e.Info.buf = nil
-	*e = CallEntry{}          // DBG: zero everything
+
+	cfg := GetCfg()
+	if cfg.Dbg&DbgFAllocs != 0 {
+		//  only if dbg flags ...
+		*e = CallEntry{} // DBG: zero everything
+	}
 	e.hashNo = ^uint32(0) - 1 // DBG: set invalid hash (mark as free'd)
 	CallEntryAllocStats.TotalSize.Dec(uint(totalBufSize) + uint(callEntrySize))
 	poolCallEntry.Put(e)
@@ -270,7 +275,12 @@ func FreeRegEntry(e *RegEntry) {
 		poolBuffs[pNo].Put(unsafe.Pointer(&e.buf[0]))
 	}
 	e.buf = nil
-	*e = RegEntry{}           // DBG: zero it to force crashes on re-use w/o alloc
+
+	cfg := GetCfg()
+	if cfg.Dbg&DbgFAllocs != 0 {
+		//  only if dbg flags ...
+		*e = RegEntry{} // DBG: zero it to force crashes on re-use w/o alloc
+	}
 	e.hashNo = ^uint32(0) - 1 // DBG: set invalid hash
 	RegEntryAllocStats.TotalSize.Dec(uint(totalBufSize) + uint(regEntrySize))
 	poolRegEntry.Put(e)

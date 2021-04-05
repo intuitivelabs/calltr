@@ -13,6 +13,47 @@ import (
 	"unsafe"
 )
 
+func TestCallStateAllocFree(t *testing.T) {
+
+	const N = 1000000
+
+	for i := 0; i < N; i++ {
+		sz := uint(rand.Intn(128))
+		// repeat n times alloc(sz), free(sz)
+		for n := 0; n < 100; n++ {
+			e := AllocCallEntry(sz, 0)
+			e.Reset()
+			if len(e.Key.buf) < int(sz) {
+				t.Errorf("wrong buf size %d, expected at least %d\n",
+					len(e.Key.buf), sz)
+			}
+			/* usefull only if everything is allocated into one block
+			(AllocCallsPerEntry == 1), e.g.  build with alloc_oneblock */
+			if AllocCallsPerEntry == 1 && len(e.Key.buf) != 0 &&
+				uintptr(unsafe.Pointer(&(e.Key.buf[0]))) !=
+					uintptr(unsafe.Pointer(e))+unsafe.Sizeof(*e) {
+				t.Errorf("wrong buffer offset %p, e = %p , sizeof(e)=%x\n",
+					&e.Key.buf[0], e, unsafe.Sizeof(*e))
+			}
+			for j := 0; j < len(e.Key.buf); j++ {
+				e.Key.buf[j] = 0xff
+			}
+			// check beginning and end
+			if e.next != nil || e.prev != nil ||
+				e.refCnt != 0 {
+				t.Errorf("corrupted call entry\n")
+			}
+			if uintptr(unsafe.Pointer(e))%unsafe.Alignof(*e) != 0 {
+				t.Errorf("alignment error for e: %p not multiple of %d\n",
+					e, unsafe.Alignof(*e))
+			}
+			FreeCallEntry(e)
+		}
+	}
+	runtime.GC()
+	runtime.GC()
+}
+
 func TestCallStateAlloc(t *testing.T) {
 
 	const N = 1000000
@@ -78,6 +119,14 @@ func TestCallStateAllocLstGC(t *testing.T) {
 	GCentries := 0    // garbage collected entries
 	BadGCEntries := 0 // entries that should not have been gc'ed (not freed)
 
+	/*
+		startUsed := uint64(0)
+		if AllocType == AllocQMalloc {
+			used := qm.MUsage()
+			startUsed = used.Used
+		}
+	*/
+
 	i := 0
 	for ; i < N; i++ {
 		sz := uint(rand.Intn(128))
@@ -107,14 +156,31 @@ func TestCallStateAllocLstGC(t *testing.T) {
 			t.Errorf("alignment error for e: %p not multiple of %d\n",
 				e, unsafe.Alignof(*e))
 		}
+
 		// set new, test finaliser
-		runtime.SetFinalizer(e, nil)
-		runtime.SetFinalizer(e, func(c *CallEntry) {
-			GCentries++
-			if c.hashNo != (^uint32(0) - 1) {
-				BadGCEntries++
-			}
-		})
+		if AllocType == AllocOneBlock {
+			bHdrSize := uint(unsafe.Sizeof(pblockInfo{}))
+			pbHdr := (*pblockInfo)(unsafe.Pointer(uintptr(unsafe.Pointer(e)) -
+				uintptr(bHdrSize)))
+			runtime.SetFinalizer(pbHdr, nil)
+			runtime.SetFinalizer(pbHdr, func(b *pblockInfo) {
+				pce := unsafe.Pointer(uintptr(unsafe.Pointer(b)) +
+					uintptr(bHdrSize))
+				c := (*CallEntry)(pce)
+				GCentries++
+				if c.hashNo != (^uint32(0) - 1) {
+					BadGCEntries++
+				}
+			})
+		} else if AllocType != AllocQMalloc {
+			runtime.SetFinalizer(e, nil)
+			runtime.SetFinalizer(e, func(c *CallEntry) {
+				GCentries++
+				if c.hashNo != (^uint32(0) - 1) {
+					BadGCEntries++
+				}
+			})
+		}
 		e.hashNo = 0
 		lst.Insert(e)
 	}
@@ -158,15 +224,28 @@ func TestCallStateAllocLstGC(t *testing.T) {
 	}
 	t.Logf("after final force GC (GCentries=%d/%d Bad=%d)\n",
 		GCentries, N, BadGCEntries)
-	if GCentries != N {
-		t.Errorf("too few entries garabage collected after freeing them"+
-			" and force GC run %d/%d (not freed %d)\n",
-			GCentries, N, BadGCEntries)
-	}
-	if BadGCEntries != 0 {
-		t.Errorf("entries GCed but not freed (FreeCallEnty()):"+
-			" %d/%d (total GCed: %d)\n",
-			BadGCEntries, N, GCentries)
+	if AllocType == AllocQMalloc {
+		/*
+			used := qm.MUsage()
+			endUsed := used.Used
+			if endUsed != startUsed {
+				t.Errorf("QMalloc memory leak: start %d end %d"+
+					" => %d difference (%+v)\n",
+					startUsed, endUsed, endUsed-startUsed,
+					qm.MUsage())
+			}
+		*/
+	} else {
+		if GCentries != N {
+			t.Errorf("too few entries garabage collected after freeing them"+
+				" and force GC run %d/%d (not freed %d)\n",
+				GCentries, N, BadGCEntries)
+		}
+		if BadGCEntries != 0 {
+			t.Errorf("entries GCed but not freed (FreeCallEnty()):"+
+				" %d/%d (total GCed: %d)\n",
+				BadGCEntries, N, GCentries)
+		}
 	}
 	//	t.Logf("%d test runs (alloc type %q build tags %v)\n", i,
 	//		AllocTypeName, BuildTags)

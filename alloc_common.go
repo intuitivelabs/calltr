@@ -14,6 +14,7 @@ const (
 	AllocSimple   = iota // simple. separate struct & common buf
 	AllocPool            // separate struct & buf, but use pools
 	AllocOneBlock        // struct & buf in one block
+	AllocQMalloc         // one block, but outside go GC
 )
 
 // each conditional build variant should define
