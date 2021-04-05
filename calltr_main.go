@@ -527,6 +527,8 @@ func unlinkCallEntryUnsafe(e *CallEntry, unref bool) bool {
 			cstHash.cnts.grp.Dec(cstHash.cnts.hState[int(e.State)])
 		}
 		unlinked = true
+	} else {
+		BUG("not in cstHash\n")
 	}
 	if re != nil {
 		h := re.hashNo
