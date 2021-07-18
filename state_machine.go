@@ -154,6 +154,18 @@ func updateStateReq(e *CallEntry, m *sipsp.PSIPMsg, dir int) (CallState, Timeout
 			toFlags = FTimerUpdGT // don't reduce the timeout
 		}
 	default:
+		if dir == 0 && mmethod != sipsp.MRegister &&
+			mmethod != sipsp.MPrack && mmethod != sipsp.MAck &&
+			mmethod != sipsp.MUpdate {
+			if pai1 := m.PV.PAIs.GetPAI(0); pai1 != nil {
+				e.Info.OverwriteAttrField(AttrPAI1,
+					&pai1.URI, m.Buf)
+			}
+			if pai2 := m.PV.PAIs.GetPAI(1); pai2 != nil {
+				e.Info.OverwriteAttrField(AttrPAI2,
+					&pai2.URI, m.Buf)
+			}
+		}
 		// INVITE, ACK or non-INVITE in-dialog
 		if mhastotag {
 			switch prevState {

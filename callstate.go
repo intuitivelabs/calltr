@@ -34,6 +34,10 @@ const (
 	MaxUASpace          = 64  // max sace for saving UA (from UAC or UAS)
 	DefaultUACSpace     = 64
 	DefaultUASSpace     = 48
+	MaxPAI1Space        = 160 // max space for saving 1st P-Asserted-Identity
+	DefaultPAI1Space    = 64  // if 1st PAI not known yet
+	MaxPAI2Space        = 96  // max space for saving 2nd P-Asserted-Identity
+	DefaultPAI2Space    = 32  // if 2nd PAI not known yet
 	HashSize            = 65536
 )
 
@@ -324,6 +328,8 @@ const (
 	AttrReason
 	AttrUA
 	AttrUAS
+	AttrPAI1
+	AttrPAI2
 	AttrLast
 )
 
@@ -336,6 +342,8 @@ var callAttrTStr = [...]string{
 	AttrReason:  "sip.sip_reason",      // winning reply reason
 	AttrUA:      "user_agent.original", // from-ua / uac
 	AttrUAS:     "uas.original",        // server/remote-side UA
+	AttrPAI1:    "sip.pai1",            // 1st P-Asserted-Identity value
+	AttrPAI2:    "sip.pai2",            // 2nd P-Asserted-Identity value
 	AttrLast:    "invalid",
 }
 
@@ -361,6 +369,8 @@ var AttrSpace = [AttrLast]AttrLenRange{
 	AttrReason:  {MinReasonSpace, MaxReasonSpace, DefaultReasonSpace},
 	AttrUA:      {0, MaxUASpace, DefaultUACSpace},
 	AttrUAS:     {0, MaxUASpace, DefaultUASSpace},
+	AttrPAI1:    {0, MaxPAI1Space, DefaultPAI1Space},
+	AttrPAI2:    {0, MaxPAI2Space, DefaultPAI2Space},
 }
 
 // CallInfo contains extra call information for event generation.
@@ -477,6 +487,9 @@ func (ci *CallInfo) AddMethod(v *sipsp.PField, buf []byte) bool {
 
 // helper function: fills src array with corresp. values from the sip msg.
 func FillAttrsSrc(m *sipsp.PSIPMsg, dir int, src *[AttrLast]*sipsp.PField) {
+	// P-Asserted-Identity: taken only from requests from UAC->UAS
+	src[AttrPAI1] = nil
+	src[AttrPAI2] = nil
 	if m.Request() {
 		if dir == 0 {
 			src[AttrFromURI] = &m.PV.From.URI
@@ -493,6 +506,16 @@ func FillAttrsSrc(m *sipsp.PSIPMsg, dir int, src *[AttrLast]*sipsp.PField) {
 			src[AttrReason] = nil
 			src[AttrUA] = &m.HL.GetHdr(sipsp.HdrUA).Val
 			src[AttrUAS] = nil
+			pai1 := m.PV.PAIs.GetPAI(0)
+			if pai1 != nil {
+				// take only the uri
+				src[AttrPAI1] = &pai1.URI
+			}
+			pai2 := m.PV.PAIs.GetPAI(1)
+			if pai2 != nil {
+				// take only the uri
+				src[AttrPAI2] = &pai2.URI
+			}
 		} else {
 			src[AttrFromURI] = &m.PV.To.URI
 			src[AttrToURI] = &m.PV.From.URI
