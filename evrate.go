@@ -345,6 +345,7 @@ func (er *EvRateEntry) UpdateRates(crtT timestamp.TS, maxRates *EvRateMaxes,
 			er.exState.ExRateId = uint8(rateIdx)
 			er.exState.OkConseq = uint64(evCntUpd)
 			er.exState.ExChgT = crtT
+			// record time when it changed to ok, even if on timer/GC
 			er.exState.OkLastT = crtT
 		} else {
 			// changed from Ok to Exceeded
@@ -352,18 +353,27 @@ func (er *EvRateEntry) UpdateRates(crtT timestamp.TS, maxRates *EvRateMaxes,
 			er.exState.ExRateId = uint8(rateIdx)
 			er.exState.ExConseq = uint64(evCntUpd)
 			er.exState.ExChgT = crtT
+			// record time when it changed to exceeded, even if on timer/GC
 			er.exState.ExLastT = crtT
 		}
 	} else {
 		// no state change
 		if er.exState.Exceeded {
 			er.exState.ExRateId = uint8(rateIdx)
-			er.exState.ExConseq += uint64(evCntUpd)
-			er.exState.ExLastT = crtT
+			if evCntUpd != 0 {
+				er.exState.ExConseq += uint64(evCntUpd)
+				//  don't change last expired time if evCntUpd==0
+				//  (update on timer/GC and not due to an actual event)
+				er.exState.ExLastT = crtT
+			}
 		} else {
 			er.exState.ExRateId = uint8(rateIdx)
-			er.exState.OkConseq += uint64(evCntUpd)
-			er.exState.OkLastT = crtT
+			if evCntUpd != 0 {
+				er.exState.OkConseq += uint64(evCntUpd)
+				//  don't change last ok time if evCntUpd==0
+				//  (update on timer/GC and not due to an actual event)
+				er.exState.OkLastT = crtT
+			}
 		}
 	}
 	if er.exState.ExChgT.IsZero() {
