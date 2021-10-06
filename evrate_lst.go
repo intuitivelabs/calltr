@@ -30,11 +30,11 @@ var EvRateDefaultIntvls = [NEvRates]time.Duration{
 
 var DefaultForceGCMatchConds = []MatchEvROffs{
 	// ok entries that have not been used in 10 min
-	{OpEx: MOpEQ, Ex: false, OpOkLastT: MOpLT, DOkLastT: 10 * time.Minute},
+	{OpEx: MOpEQ, Ex: false, OpOkLastT: MOpGT, DOkLastT: 10 * time.Minute},
 	// ok entries that have not been used in 10s
-	{OpEx: MOpEQ, Ex: false, OpOkLastT: MOpLT, DOkLastT: 30 * time.Second},
+	{OpEx: MOpEQ, Ex: false, OpOkLastT: MOpGT, DOkLastT: 30 * time.Second},
 	// exceeded entries that have not been used in 10s
-	{OpEx: MOpEQ, Ex: true, OpExLastT: MOpLT, DExLastT: 10 * time.Second},
+	{OpEx: MOpEQ, Ex: true, OpExLastT: MOpGT, DExLastT: 10 * time.Second},
 }
 
 // DefaultForceGCRunL
@@ -532,7 +532,7 @@ func (h *EvRateHash) lightGC(target uint32, now timestamp.TS) (bool, uint, bool)
 	var m MatchEvRTS
 	m.OpEx = MOpEQ
 	m.Ex = false        // match non exceeded values only
-	m.OpOkLastT = MOpLT // match last OK value older then ...
+	m.OpOkLastT = MOpGT // match last OK value older then (OkLastT > last ok T)
 	gcfg := h.GetGCcfg()
 	lifetime := gcfg.LightGCtimeL
 	runl := gcfg.LightGCrunL
