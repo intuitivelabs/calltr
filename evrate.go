@@ -531,9 +531,9 @@ func (m MatchOp) String() string {
 
 func opCmpTime(T1 timestamp.TS, op MatchOp, T2 timestamp.TS) bool {
 	return (op == MOpNone) ||
+		((op&MOpGT) != 0 && T1.After(T2)) ||
 		((op&MOpLT) != 0 && T1.Before(T2)) ||
-		((op&MOpEQ) != 0 && T1.Equal(T2)) ||
-		((op&MOpGT) != 0 && T1.After(T2))
+		((op&MOpEQ) != 0 && T1.Equal(T2))
 }
 
 func opCmpUint64(v1 uint64, op MatchOp, v2 uint64) bool {
