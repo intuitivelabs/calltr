@@ -227,12 +227,14 @@ type evRateStats struct {
 	hGCfail counters.Handle
 	hGCto   counters.Handle
 	hGCn    counters.Handle
+	hGCrm   counters.Handle
 
 	lGCruns counters.Handle
 	lGCok   counters.Handle
 	lGCfail counters.Handle
 	lGCto   counters.Handle
 	lGCn    counters.Handle
+	lGCrm   counters.Handle
 
 	maxGCretrF counters.Handle
 	allocF     counters.Handle
@@ -313,7 +315,11 @@ func (h *EvRateHash) Init(sz, maxEntries uint32, maxRates *EvRateMaxes) {
 		{&h.cnts.hGCto, 0, nil, nil, "hard_gc_timeout",
 			"how many times did the hard GC time out"},
 		{&h.cnts.hGCn, counters.CntMaxF | counters.CntMinF, nil, nil,
-			"hard_gc_walked", "how many entries did the last hard GC run walk"},
+			"hard_gc_walked",
+			"how many entries did the last hard GC run walk"},
+		{&h.cnts.hGCrm, counters.CntMaxF | counters.CntMinF, nil, nil,
+			"hard_gc_removed",
+			"how many entries did the last hard GC run remove"},
 
 		{&h.cnts.lGCruns, 0, nil, nil, "light_gc_runs",
 			"light GC runs, everytime light_gc_trigger is exceeded"},
@@ -326,6 +332,9 @@ func (h *EvRateHash) Init(sz, maxEntries uint32, maxRates *EvRateMaxes) {
 		{&h.cnts.lGCn, counters.CntMaxF | counters.CntMinF, nil, nil,
 			"light_gc_walked",
 			"how many entries did the last light GC run walk"},
+		{&h.cnts.lGCrm, counters.CntMaxF | counters.CntMinF, nil, nil,
+			"light_gc_removed",
+			"how many entries did the last light GC run remove"},
 
 		{&h.cnts.maxGCretrF, 0, nil, nil, "max_gc_retr_fail",
 			"maximum GC retries per alloc entry, exceeded"},
@@ -476,8 +485,10 @@ func (h *EvRateHash) GetCopy(ev EventType, src NetInfo, dst *EvRateEntry) bool {
 }
 
 // hardGC tries hard to free memory up to target.
-// returns true if succeeds, number of walked entries and a timeout flag.
-func (h *EvRateHash) hardGC(target uint32, now timestamp.TS) (bool, uint, bool) {
+// returns true if succeeds, number of walked entries, number of removed
+// entries and a timeout flag.
+func (h *EvRateHash) hardGC(target uint32, now timestamp.TS) (bool,
+	uint, uint, bool) {
 	// try evicting older entries than
 	//        Now - ForceGCtimeL[k] till success (target met)
 	// Each GC run has a time limit in h.gcCfg.ForceGCrunL.
@@ -485,7 +496,8 @@ func (h *EvRateHash) hardGC(target uint32, now timestamp.TS) (bool, uint, bool) 
 	// If there are no run limits, 0 will be used (no limit).
 	ok := false
 	to := false
-	var n uint
+	var n, rmvd uint
+	var total, totalRm uint
 
 	gcfg := h.GetGCcfg()
 	matchConds := *gcfg.ForceGCMatchC
@@ -501,7 +513,9 @@ func (h *EvRateHash) hardGC(target uint32, now timestamp.TS) (bool, uint, bool) 
 		} else if len(runTimes) > 0 {
 			runLim = now.Add(runTimes[len(runTimes)-1])
 		} // else runTimes is empty => no run time limit
-		ok, n, to = h.ForceEvict(uint64(target), m, now, runLim)
+		ok, n, rmvd, to = h.ForceEvict(uint64(target), m, now, runLim)
+		total += n
+		totalRm += rmvd
 		if ok {
 			break
 		}
@@ -523,12 +537,14 @@ func (h *EvRateHash) hardGC(target uint32, now timestamp.TS) (bool, uint, bool) 
 		atomic.CompareAndSwapUint32(&h.gcStrategy, strategyIdx,
 			uint32(len(matchConds)-1))
 	}
-	return ok, n, to
+	return ok, total, totalRm, to
 }
 
 // lightGC tries to free memory up to target, in a lightweight way.
-// returns true if succeeds, number of walked entries and a timeout flag.
-func (h *EvRateHash) lightGC(target uint32, now timestamp.TS) (bool, uint, bool) {
+// returns true if succeeds, number of walked entries, number of deleted
+// entries and a timeout flag.
+func (h *EvRateHash) lightGC(target uint32, now timestamp.TS) (bool,
+	uint, uint, bool) {
 	var m MatchEvRTS
 	m.OpEx = MOpEQ
 	m.Ex = false        // match non exceeded values only
@@ -586,8 +602,9 @@ func (h *EvRateHash) IncUpdate(ev EventType, src NetInfo,
 			// If there are no run limits, 0 will be used (no limit).
 			targetMax := gcfg.TargetMax
 			h.cnts.grp.Inc(h.cnts.hGCruns)
-			ok, n, to := h.hardGC(targetMax, crtT)
+			ok, n, rmvd, to := h.hardGC(targetMax, crtT)
 			h.cnts.grp.Set(h.cnts.hGCn, counters.Val(n))
+			h.cnts.grp.Set(h.cnts.hGCrm, counters.Val(rmvd))
 			if to {
 				// exited due to timeout
 				h.cnts.grp.Inc(h.cnts.hGCto)
@@ -607,8 +624,9 @@ func (h *EvRateHash) IncUpdate(ev EventType, src NetInfo,
 			gcRuns++
 			gcTarget := gcfg.GCtarget
 			h.cnts.grp.Inc(h.cnts.lGCruns)
-			ok, n, to := h.lightGC(gcTarget, crtT)
+			ok, n, rmvd, to := h.lightGC(gcTarget, crtT)
 			h.cnts.grp.Set(h.cnts.lGCn, counters.Val(n))
+			h.cnts.grp.Set(h.cnts.lGCrm, counters.Val(rmvd))
 			if to {
 				// exited due to timeout
 				h.cnts.grp.Inc(h.cnts.lGCto)
@@ -747,13 +765,14 @@ func (h *EvRateHash) getNextExceededLock(bIdx, bPos uint, val bool) (*EvRateEntr
 // The check for run time exceed will be performed every chkto entries
 // starting at chkoffs ((n + chkoffs) % chkto == 0).
 // (if rLim or chkto == 0, no timeout check is performed)
-// returns target_met, walked_entries_no, timeout
+// returns target_met, walked_entries_no, removed_entries_no, timeout
 func (h *EvRateHash) evictLst(m MatchEvRTS,
 	first *EvRateEntry, lst *EvRateEntryLst, maxE uint,
 	target uint64, rLim timestamp.TS, chkto, chkoffs uint,
-	crtT timestamp.TS) (bool, uint, bool) {
+	crtT timestamp.TS) (bool, uint, uint, bool) {
 
 	n := uint(0)
+	rmvd := uint(0)
 	for e, nxt := first, first.next; e != &lst.head; e, nxt = nxt, nxt.next {
 
 		// update the state, before checking if exceeded
@@ -761,19 +780,20 @@ func (h *EvRateHash) evictLst(m MatchEvRTS,
 		if m.MatchST(e) { // entries matching m (state & timestamps only)
 			lst.RmUnsafe(e)
 			e.Unref()
+			rmvd++
 			if h.entries.Dec(1) <= target {
 				// include current entry in "walked" count (n+1)
-				return true, n + 1, false
+				return true, n + 1, rmvd, false
 			}
 		}
 		n++
 		if (n >= maxE) ||
 			(chkto != 0 && ((n+chkoffs)%chkto) == 0 &&
 				!rLim.IsZero() && timestamp.Now().After(rLim)) {
-			return false, n, !(n >= maxE)
+			return false, n, rmvd, !(n >= maxE)
 		}
 	}
-	return false, n, false
+	return false, n, rmvd, false
 }
 
 // ForceEvict will try very hard to free entries until target is reached or
@@ -790,13 +810,13 @@ func (h *EvRateHash) evictLst(m MatchEvRTS,
 //   rLim   - stop if running for more then this interval.
 //
 // It returns true on success, false if it could not meet target or timeout,
-// the number of "walked" entries and whether or not it ended due to
-// timeout (rLim exceeded).
+// the number of "walked" entries, the number of removed entries and whether
+// or not it ended due to timeout (rLim exceeded).
 func (h *EvRateHash) ForceEvict(target uint64, m MatchEvRTS,
-	crtT, rLim timestamp.TS) (bool, uint, bool) {
+	crtT, rLim timestamp.TS) (bool, uint, uint, bool) {
 	const ChkT = 10000 // how often to check time
 	var ok, to bool
-	var n uint
+	var n, rmvd uint
 	var lst *EvRateEntryLst
 
 	// value when starting
@@ -805,7 +825,8 @@ func (h *EvRateHash) ForceEvict(target uint64, m MatchEvRTS,
 	bIdx0 := atomic.LoadUint32(&h.gcBidx)
 	bPos0 := atomic.LoadUint32(&h.gcBpos)
 
-	total := uint(0) // total entries walked
+	total := uint(0)   // total entries walked
+	totalRm := uint(0) // total entries removed
 	/// get next non rate-exceeded element, >bPos0
 	// e, b, p := h.getNextExceededLock(uint(bIdx0), uint(bPos0), false)
 	// get next element after element at h.gcBidx, h.gcBpos:
@@ -818,12 +839,13 @@ func (h *EvRateHash) ForceEvict(target uint64, m MatchEvRTS,
 	// search in HTable[b] from p till the end
 	lst = &h.HTable[b]
 	// lst is already locked here by h.getNextExceededLock(...)
-	ok, n, to = h.evictLst(m, e, lst, ^uint(0), /* all  elems*/
+	ok, n, rmvd, to = h.evictLst(m, e, lst, ^uint(0), /* all  elems*/
 		target, rLim, ChkT, total, crtT)
 	p += uint(n)
 	lst.Unlock()
 	// time limit check
 	total += n
+	totalRm += rmvd
 
 	if ok || to {
 		goto end_unlocked
@@ -846,10 +868,11 @@ func (h *EvRateHash) ForceEvict(target uint64, m MatchEvRTS,
 		lst = &h.HTable[int(i)%len(h.HTable)]
 		if lst.entries.Get() > 0 { // race, but we don't care
 			lst.Lock()
-			ok, n, to = h.evictLst(m, lst.head.next, lst, ^uint(0),
+			ok, n, rmvd, to = h.evictLst(m, lst.head.next, lst, ^uint(0),
 				target, rLim, ChkT, total, crtT)
 			lst.Unlock()
 			total += n
+			totalRm += rmvd
 			if ok || to {
 				b = i % uint(len(h.HTable))
 				p = n
@@ -865,10 +888,11 @@ func (h *EvRateHash) ForceEvict(target uint64, m MatchEvRTS,
 		lst = &h.HTable[b]
 		if lst.entries.Get() > 0 { // race, but we don't care
 			lst.Lock()
-			ok, n, to = h.evictLst(m, lst.head.next, lst, uint(bPos0),
+			ok, n, rmvd, to = h.evictLst(m, lst.head.next, lst, uint(bPos0),
 				target, rLim, ChkT, total, crtT)
 			lst.Unlock()
 			total += n
+			totalRm += rmvd
 			if ok || to {
 				if uint64(n) >= lst.entries.Get() {
 					// walked all the list => next time start with next
@@ -888,7 +912,7 @@ end_unlocked:
 	if atomic.CompareAndSwapUint32(&h.gcBidx, bIdx0, uint32(b)) {
 		atomic.CompareAndSwapUint32(&h.gcBpos, bPos0, uint32(p))
 	}
-	return ok, total, to
+	return ok, total, totalRm, to
 }
 
 // Stats returns a HStats structure filled with hash table statistics.
