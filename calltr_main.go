@@ -780,7 +780,17 @@ func updateRegCache(event EventType, e *CallEntry, aor []byte, c []byte) (bool, 
 	var aorURI sipsp.PsipURI
 	var cURI sipsp.PsipURI
 	err1, _ := sipsp.ParseURI(aor, &aorURI)
-	err2, _ := sipsp.ParseURI(c, &cURI)
+	var err2 sipsp.ErrorURI
+	// handle EvRegDel with '*' contact
+	if event == EvRegDel && len(c) == 1 {
+		if c[0] == '*' {
+			err2 = 0
+		} else {
+			err2 = sipsp.ErrURITooShort
+		}
+	} else {
+		err2, _ = sipsp.ParseURI(c, &cURI)
+	}
 	if err1 != 0 || err2 != 0 {
 		return false, EvNone
 	}
