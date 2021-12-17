@@ -672,11 +672,15 @@ func finalTimeoutEv(e *CallEntry) EventType {
 		}
 		// else if REGISTER, like above, do nothing
 	case CallStNonInvFinished:
-		if e.Method == sipsp.MRegister && !e.EvFlags.Test(EvRegDel) {
-			event = EvRegExpired
-		}
-		// for every non-inv that is not a REGISTER => EvOtherOk
-		if e.Method != sipsp.MRegister {
+		if e.Method == sipsp.MRegister {
+			if !e.EvFlags.Test(EvRegDel) {
+				// for EvRegNew without an EvRegDel:
+				event = EvRegExpired
+			}
+			// else do nothing for EvRegDel: this event is
+			// generated on reply and not here  => EvNone
+		} else {
+			// for every non-inv that is not a REGISTER => EvOtherOk
 			event = EvOtherOk
 		}
 
