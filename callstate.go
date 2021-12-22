@@ -306,7 +306,7 @@ var cfNames = [...]string{
 func (cf CallFlags) String() string {
 	var s string
 	for i := 1; i < len(cfNames); i++ {
-		if cf&(1<<uint(i)) != 0 {
+		if cf&(1<<uint(i-1)) != 0 {
 			if s != "" {
 				s += "|" + cfNames[i]
 			} else {
