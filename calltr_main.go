@@ -455,6 +455,7 @@ func forkCallEntry(e *CallEntry, m *sipsp.PSIPMsg, dir int, match CallMatchType,
 			n.ReqsNo[1] = e.ReqsNo[1]
 		*/
 		n.prevState = e.prevState    // debugging
+		n.prevState.Add(e.State)     // debugging, add current state
 		n.lastEv = e.lastEv          // debugging
 		n.CreatedTS = e.CreatedTS    // debugging
 		n.forkedTS = timestamp.Now() // debugging
