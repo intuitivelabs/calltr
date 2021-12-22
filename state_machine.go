@@ -300,7 +300,7 @@ end:
 	// update state
 	e.prevState.Add(e.State) // debugging
 	e.lastMethod[dir] = mmethod
-	e.lastMsgs.AddReq(mmethod, dir, 0)
+	e.lastMsgs.AddReq(mmethod, dir, false, 1)
 	chgState(e, newState, dir)
 	// add extra event attributes from msg that are not already set
 	e.Info.AddFromMsg(m, dir)
@@ -313,7 +313,7 @@ retr: // retransmission or PRACK
 	newState = prevState
 	toFlags = FTimerUpdGT // update timer only if not already greater...
 	e.ReqsRetrNo[dir]++
-	e.lastMsgs.AddReq(mmethod, dir, 1)
+	e.lastMsgs.AddReq(mmethod, dir, true, 1)
 	return prevState, TimeoutS(prevState.TimeoutS()), toFlags, EvNone
 }
 
@@ -578,7 +578,7 @@ func updateStateRepl(e *CallEntry, m *sipsp.PSIPMsg, dir int) (CallState, Timeou
 		e.Info.OverwriteAttrField(AttrReason, &m.FL.Reason, m.Buf)
 	}
 	e.lastReplStatus[dir] = mstatus
-	e.lastMsgs.AddRepl(mstatus, dir, 0)
+	e.lastMsgs.AddRepl(mstatus, dir, false, 1)
 	e.ReplsNo[dir]++
 	e.prevState.Add(e.State)
 	chgState(e, newState, dir)
@@ -595,7 +595,7 @@ func updateStateRepl(e *CallEntry, m *sipsp.PSIPMsg, dir int) (CallState, Timeou
 retr: // retransmission, ignore
 	newState = prevState
 	e.ReplsRetrNo[dir]++
-	e.lastMsgs.AddRepl(mstatus, dir, 1)
+	e.lastMsgs.AddRepl(mstatus, dir, true, 1)
 	toFlags = FTimerUpdGT // update timer only if not already greater...
 	to = TimeoutS(prevState.TimeoutS())
 	return prevState, to, toFlags, EvNone

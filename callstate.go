@@ -748,15 +748,25 @@ type MsgBackTrace struct {
 	N    uint // number of message
 }
 
-func (m *MsgBackTrace) AddReq(method sipsp.SIPMethod, dir, retr int) {
-	if retr != 0 && m.N > 0 {
+//AddReq adds a request to the message trace.
+// The parameteres are:
+//    method - the sip request method
+//    dir    - the request direction (UAC -> UAS or UAS -> UAC)
+//    isRetr - true if it's a retransmission of some previous request
+//    msgCnt - number of identical messages to add (at least 1)
+func (m *MsgBackTrace) AddReq(method sipsp.SIPMethod, dir int,
+	isRetr bool, msgCnt int) {
+	if msgCnt < 1 {
+		return
+	}
+	if isRetr && m.N > 0 {
 		var mr MsgRec
 		mr.InitReq(method, dir, 0)
 		idx := int(m.N-1) % len(m.Msgs)
-		if m.Msgs[idx]&^MsgRecRetrMask == mr && m.Msgs[idx].Retrs() > 0 {
-			newRetr := m.Msgs[idx].Retrs() + retr
+		if m.Msgs[idx]&^MsgRecRetrMask == mr /*&& m.Msgs[idx].Retrs() > 0*/ {
+			newRetr := m.Msgs[idx].Retrs() + msgCnt
 			if newRetr > MsgRecMaxRetr {
-				retr -= (newRetr - MsgRecMaxRetr)
+				msgCnt -= (newRetr - MsgRecMaxRetr)
 				newRetr = MsgRecMaxRetr
 				m.Msgs[idx].SetRetrs(newRetr)
 				// fallthrough to adding new "record" with rest retrs.
@@ -767,19 +777,29 @@ func (m *MsgBackTrace) AddReq(method sipsp.SIPMethod, dir, retr int) {
 			}
 		}
 	}
-	m.Msgs[int(m.N)%len(m.Msgs)].InitReq(method, dir, retr)
+	m.Msgs[int(m.N)%len(m.Msgs)].InitReq(method, dir, msgCnt-1)
 	m.N++
 }
 
-func (m *MsgBackTrace) AddRepl(status uint16, dir, retr int) {
-	if retr != 0 && m.N > 0 {
+//AddRepl adds a reply to the message trace.
+// The parameteres are:
+//    status - the sip reply status code
+//    dir    - the request direction (UAC -> UAS or UAS -> UAC)
+//    isRetr - true if it's a retransmission of some previous reply
+//    msgCnt - number of identical messages to add (at least 1)
+func (m *MsgBackTrace) AddRepl(status uint16, dir int,
+	isRetr bool, msgCnt int) {
+	if msgCnt < 1 {
+		return
+	}
+	if isRetr && m.N > 0 {
 		var mr MsgRec
 		mr.InitRepl(status, dir, 0)
 		idx := int(m.N-1) % len(m.Msgs)
-		if m.Msgs[idx]&^MsgRecRetrMask == mr && m.Msgs[idx].Retrs() > 0 {
-			newRetr := m.Msgs[idx].Retrs() + retr
+		if m.Msgs[idx]&^MsgRecRetrMask == mr /*&& m.Msgs[idx].Retrs() > 0*/ {
+			newRetr := m.Msgs[idx].Retrs() + msgCnt
 			if newRetr > MsgRecMaxRetr {
-				retr -= (newRetr - MsgRecMaxRetr)
+				msgCnt -= (newRetr - MsgRecMaxRetr)
 				newRetr = MsgRecMaxRetr
 				m.Msgs[idx].SetRetrs(newRetr)
 				// fallthrough to adding new "record" with rest retrs.
@@ -790,7 +810,7 @@ func (m *MsgBackTrace) AddRepl(status uint16, dir, retr int) {
 			}
 		}
 	}
-	m.Msgs[int(m.N)%len(m.Msgs)].InitRepl(status, dir, retr)
+	m.Msgs[int(m.N)%len(m.Msgs)].InitRepl(status, dir, msgCnt-1)
 	m.N++
 }
 
