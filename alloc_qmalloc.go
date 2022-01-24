@@ -4,10 +4,8 @@
 // that can be found in the LICENSE.txt file in the root of the source
 // tree.
 
-//+build alloc_qmalloc
-//+build !alloc_pool
-//+build !alloc_simple
-//+build !alloc_oneblock
+//go:build alloc_qmalloc && !alloc_pool && !alloc_simple && !alloc_oneblock
+// +build alloc_qmalloc,!alloc_pool,!alloc_simple,!alloc_oneblock
 
 package calltr
 
