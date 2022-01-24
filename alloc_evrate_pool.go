@@ -55,8 +55,7 @@ func AllocEvRateEntry() *EvRateEntry {
 	} else {
 		EvRateEntryAllocStats.PoolHits[pNo].Inc(1)
 	}
-	*n = EvRateEntry{} // DBG: zero it
-	n.Reset()
+	n.Reset() // zero it
 	eSz := unsafe.Sizeof(*n)
 	EvRateEntryAllocStats.TotalSize.Inc(uint(eSz))
 	//DBG("AllocEvRateEntry(%d) => %p\n", bufSize, n)

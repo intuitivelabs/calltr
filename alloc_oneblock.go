@@ -106,7 +106,7 @@ func AllocCallEntry(keySize, infoSize uint) *CallEntry {
 		},
 		)
 	}
-	*n = e
+	n.Reset()             // zero it
 	n.hashNo = ^uint32(0) // DBG: set invalid hash
 	n.Key.Init(buf[callEntrySize:(callEntrySize + keySize)])
 	n.Info.Init(buf[(callEntrySize + keySize):])
@@ -207,9 +207,9 @@ func AllocRegEntry(bufSize uint) *RegEntry {
 	//if cfg.Dbg&DbgFAllocs != 0 {
 	//runtime.SetFinalizer(&block[0], func(p unsafe.Pointer) { DBG("Finalizer &buf[0](%p)\n", p) })
 	//}
-	e.hashNo = ^uint32(0) // DBG: set invalid hash
-	e.pos = 0
-	*n = e
+	n.Reset()             // zero it
+	n.hashNo = ^uint32(0) // DBG: set invalid hash
+	n.pos = 0
 	n.buf = buf[regEntrySize:]
 	// poolno -1 used for 0 allocs and poolno > len(poolBuffs) for big allocs
 	// that don't fit in the pools

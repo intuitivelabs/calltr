@@ -116,6 +116,7 @@ func AllocCallEntry(keySize, infoSize uint) *CallEntry {
 			)
 		}
 	}
+	n.Reset()             // zero it
 	n.hashNo = ^uint32(0) // DBG: set invalid hash
 	n.Key.Init(buf[:keySize])
 	n.Info.Init(buf[keySize:])
@@ -242,7 +243,7 @@ func AllocRegEntry(bufSize uint) *RegEntry {
 			)
 		}
 	}
-	*n = RegEntry{}       // DBG: zero it
+	n.Reset()             //  zero it
 	n.hashNo = ^uint32(0) // DBG: set invalid hash
 	n.pos = 0
 	n.buf = buf

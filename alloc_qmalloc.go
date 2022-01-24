@@ -75,7 +75,7 @@ func AllocCallEntry(keySize, infoSize uint) *CallEntry {
 	slice.Cap = int(totalSize)
 
 	n := (*CallEntry)(p)
-	*n = e                // zero call entry
+	n.Reset()             // zero the call entry
 	n.hashNo = ^uint32(0) // DBG: set invalid hash
 	n.Key.Init(buf[callEntrySize:(callEntrySize + keySize)])
 	n.Info.Init(buf[(callEntrySize + keySize):])
@@ -164,9 +164,9 @@ func AllocRegEntry(bufSize uint) *RegEntry {
 	slice.Len = int(totalSize)
 	slice.Cap = int(totalSize)
 	n := (*RegEntry)(p)
-	e.hashNo = ^uint32(0) // DBG: set invalid hash
-	e.pos = 0
-	*n = e // fill with defaults
+	n.Reset()             // zero it
+	n.hashNo = ^uint32(0) // DBG: set invalid hash
+	n.pos = 0
 	n.buf = buf[regEntrySize:]
 
 	// poolno -1 used for 0 allocs and poolno > len(poolBuffs) for big allocs
