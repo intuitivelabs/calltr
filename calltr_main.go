@@ -35,6 +35,8 @@ type Config struct {
 	ContactIgnorePort bool   // ignore port when comparing contacts (but not in AORs)
 	Mem               MemConfig
 	Dbg               DbgFlags
+	// per state timeout in s, used at runtime
+	stateTimeoutS [len(defaultStateTimeoutS)]uint32
 }
 
 var crtCfg *Config = &DefaultConfig
@@ -48,7 +50,8 @@ var DefaultConfig = Config{
 		MaxRegEntries:     0,
 		MaxRegEntriesMem:  0,
 	},
-	Dbg: DbgFAllocs,
+	Dbg:           DbgFAllocs,
+	stateTimeoutS: defaultStateTimeoutS,
 }
 
 var cstHash CallEntryHash

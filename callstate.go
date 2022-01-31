@@ -180,8 +180,8 @@ const (
 	CallStNumber // number of states (invalid as state value)
 )
 
-// per state timeout in S
-var stateTimeoutS = [...]uint{
+// default per state timeout in S
+var defaultStateTimeoutS = [...]uint32{
 	CallStNone:           1,
 	CallStInit:           1,
 	CallStFInv:           120,
@@ -194,6 +194,22 @@ var stateTimeoutS = [...]uint{
 	CallStFNonInv:        30,
 	CallStNonInvNegReply: 5,
 	CallStNonInvFinished: 5,
+}
+
+// valid ranges for call state timeouts
+var stateTimeoutRanges = [...][2]uint32{
+	CallStNone:           {0, 0},
+	CallStInit:           {1, 5},
+	CallStFInv:           {1, 7200},
+	CallStEarlyDlg:       {1, 600},
+	CallStNegReply:       {1, 180},
+	CallStEstablished:    {10, 3600 * 24},
+	CallStBye:            {1, 600},
+	CallStByeReplied:     {1, 60},
+	CallStCanceled:       {1, 60},
+	CallStFNonInv:        {1, 180},
+	CallStNonInvNegReply: {1, 60},
+	CallStNonInvFinished: {1, 60},
 }
 
 var callSt2String = [...]string{
@@ -262,11 +278,55 @@ func (s CallState) Desc() string {
 	return callSt2Desc[s]
 }
 
+// TimeoutS() return the timeout for the CallState in seconds.
 func (s CallState) TimeoutS() uint {
-	if int(s) >= len(stateTimeoutS) {
+	if int(s) >= len(crtCfg.stateTimeoutS) {
 		return 0
 	}
-	return stateTimeoutS[s]
+	return uint(GetCfg().stateTimeoutS[s])
+}
+
+// StateTimeoutRange returns the valid timeout range (in seconds)
+// for the corresponding call state s.
+func StateTimeoutRange(s CallState) (uint, uint) {
+	if int(s) >= len(stateTimeoutRanges) {
+		return 0, 0
+	}
+	return uint(stateTimeoutRanges[s][0]), uint(stateTimeoutRanges[s][1])
+}
+
+// StateTimeoutValid returns true if the corresponding timeout (seconds)
+// looks like a valid value for the state s
+func StateTimeoutValid(s CallState, seconds uint) bool {
+	if int(s) >= len(crtCfg.stateTimeoutS) {
+		return false
+	}
+	min, max := StateTimeoutRange(s)
+	if min != 0 && max != 0 {
+		return seconds >= min && seconds <= max
+	}
+	// fallback
+	return seconds >= 1 && seconds <= 3600*24
+}
+
+// StateTimeoutSet sets the timeout (in seconds) for the CallState s.
+func StateTimeoutSet(cfg *Config, s CallState, seconds uint) bool {
+	if !StateTimeoutValid(s, seconds) {
+		return false
+	}
+	// just to be safer in case we are called on the actual running
+	// config, use atomic
+	atomic.StoreUint32(&cfg.stateTimeoutS[s], uint32(seconds))
+	return true
+}
+
+// StateTimeoutDefault returns the default CallState timeout for s or
+// 0 on error (invalid call state)
+func StateTimeoutDefault(s CallState) uint {
+	if int(s) >= len(defaultStateTimeoutS) {
+		return 0
+	}
+	return uint(defaultStateTimeoutS[s])
 }
 
 type CallFlags uint16
