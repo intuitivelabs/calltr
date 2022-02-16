@@ -33,12 +33,13 @@ const (
 	NProtoSCTP
 	NProtoTLS
 	NProtoDTLS
-	NProtoWS // sip over websockets
+	NProtoWS  // sip over websocket
+	NProtoWSS // sip over secure websocket
 	NAddrIPv6
 )
 
 const NProtoMask = NProtoUDP | NProtoTCP | NProtoSCTP | NProtoTLS |
-	NProtoDTLS | NProtoWS
+	NProtoDTLS | NProtoWS | NProtoWSS
 
 var protoNames = [...]string{
 	"udp",
@@ -47,6 +48,7 @@ var protoNames = [...]string{
 	"tls",
 	"dtls",
 	"ws",
+	"wss",
 }
 
 func (f NAddrFlags) Proto() NAddrFlags {
