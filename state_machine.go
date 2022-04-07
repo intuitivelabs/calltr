@@ -674,8 +674,10 @@ func finalTimeoutEv(e *CallEntry) EventType {
 	case CallStNonInvFinished:
 		if e.Method == sipsp.MRegister {
 			if !e.EvFlags.Test(EvRegDel) {
-				// for EvRegNew without an EvRegDel:
-				event = EvRegExpired
+				if e.EvFlags.Test(EvRegNew) {
+					// for EvRegNew without an EvRegDel:
+					event = EvRegExpired
+				} // else reg-fetch/ping => ignore
 			}
 			// else do nothing for EvRegDel: this event is
 			// generated on reply and not here  => EvNone
