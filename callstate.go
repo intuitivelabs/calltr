@@ -343,6 +343,7 @@ const (
 	CFTimeout          // timeout
 	CFForcedTimeout    // terminated due to forced timeout
 	CFCalleeTerminated // call terminated by callee
+	CFRegDelDelayed    // generate a "delayed" reg-del on timeout
 )
 
 // debugging, keep in sync with the CallFlags consts above
@@ -358,6 +359,7 @@ var cfNames = [...]string{
 	"Timeout",
 	"Forced_Timeout",
 	"Callee_Terminated",
+	"Delayed_RegDel",
 	"invalid",
 	"invalid",
 	"invalid",

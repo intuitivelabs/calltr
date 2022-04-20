@@ -216,6 +216,7 @@ func (lst *CallEntryLst) Find(callid, ftag, ttag []byte, cseq uint32,
 			}
 			// else:
 			mt = CallPartialMatch
+			// TODO: partialMDir = dir
 			fallthrough
 		case CallPartialMatch:
 			partialMatch, partialMDir = chooseCallIDMatch(

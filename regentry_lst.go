@@ -361,6 +361,30 @@ func (lst *RegEntryLst) FindURIUnsafe(uri *sipsp.PsipURI, buf []byte) *RegEntry 
 	return nil
 }
 
+// MatchUriUnsafe searches the list for all matching aor uris and returns the
+// a RegEntry array.
+// It does not use any locking (call it between Lock/Unlock() to be safe).
+// It tries to append all the matching entries to the res array as long as
+// there is enough space in it. It returns the total number of matching
+// entries (even if they did not fit in the passed result array).
+// If no matching entry is found it returns 0.
+func (lst *RegEntryLst) MatchURIUnsafe(uri *sipsp.PsipURI, buf []byte,
+	res *[]*RegEntry) int {
+	var n int
+	for e := lst.head.next; e != &lst.head; e = e.next {
+		if e.aorMatchURI(uri, buf) {
+			n++
+			if res != nil && cap(*res) > n {
+				*res = append(*res, e)
+				/* *res = *res[:n]
+				 *res[n-1] = e
+				 */
+			}
+		}
+	}
+	return n
+}
+
 // FindBindingUnsafe searches the list for a RegEntry matching the aor and
 // contact URIs.  It does not use any locking (call it between
 //  Lock/Unlock() to be safe).
@@ -388,6 +412,43 @@ func (lst *RegEntryLst) FindBindingUnsafe(aor *sipsp.PsipURI, abuf []byte,
 		}
 	}
 	return nil
+}
+
+// MatchBindingUnsafe searches the list for all RegEntry(s) matching the aor
+// and contact URIs.
+// It does not use any locking (call it between  Lock/Unlock() to be safe).
+// It tries to append all the matching entries to the res array as long as
+// there is enough space in it. It returns the total number of matching
+// entries (even if they did not fit in the passed result array).
+// If no matching entry is found it returns 0.
+func (lst *RegEntryLst) MatchBindingUnsafe(aor *sipsp.PsipURI, abuf []byte,
+	contact *sipsp.PsipURI, cbuf []byte,
+	res *[]*RegEntry) int {
+	var n int
+	i := 0
+	cMatchFlgs := sipsp.URICmpAll
+	ignorePort := GetCfg().ContactIgnorePort
+	if ignorePort {
+		cMatchFlgs = sipsp.URICmpSkipPort
+	}
+	loop := false
+	for e := lst.head.next; e != &lst.head; e = e.next {
+		if !loop {
+			if lst.bugChecks(e, "MatchBindingUnsafe", false) {
+				BUG("RegEntryLst(%p, %p, %q, %p, %q): loop found e=%p next=%p prev=%p at pos %d for hash %d\n", lst, aor, abuf, contact, cbuf, e, e.next, e.prev, i, e.hashNo)
+				loop = true
+			}
+		}
+		i++
+		if e.aorMatchURI(aor, abuf) &&
+			e.contactMatchURI(contact, cbuf, cMatchFlgs) {
+			n++
+			if res != nil && cap(*res) > n {
+				*res = append(*res, e)
+			}
+		}
+	}
+	return n
 }
 
 // registrations counters

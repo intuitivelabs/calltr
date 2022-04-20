@@ -32,6 +32,7 @@ type MemConfig struct {
 
 type Config struct {
 	RegDelta          uint32 // registration expire delta in s, added to expire timeouts
+	RegDelDelay       int32  // delay in generating EvRegDel in s
 	ContactIgnorePort bool   // ignore port when comparing contacts (but not in AORs)
 	Mem               MemConfig
 	Dbg               DbgFlags
@@ -43,6 +44,7 @@ var crtCfg *Config = &DefaultConfig
 
 var DefaultConfig = Config{
 	RegDelta:          0,
+	RegDelDelay:       0,
 	ContactIgnorePort: false,
 	Mem: MemConfig{
 		MaxCallEntries:    0,
@@ -786,9 +788,10 @@ func updateRegCache(event EventType, e *CallEntry, aor []byte, c []byte) (bool, 
 	var cURI sipsp.PsipURI
 	err1, _ := sipsp.ParseURI(aor, &aorURI)
 	var err2 sipsp.ErrorURI
+	matchAll := len(c) == 1 && c[0] == '*'
 	// handle EvRegDel with '*' contact
 	if event == EvRegDel && len(c) == 1 {
-		if c[0] == '*' {
+		if matchAll {
 			err2 = 0
 		} else {
 			err2 = sipsp.ErrURITooShort
@@ -804,6 +807,8 @@ func updateRegCache(event EventType, e *CallEntry, aor []byte, c []byte) (bool, 
 	switch event {
 	case EvRegNew:
 		cstHash.HTable[e.hashNo].Lock()
+		// reset a possible delayed reg-del flag
+		e.Flags &= ^CFRegDelDelayed
 		if e.regBinding == nil {
 			hURI := aorURI.Short() // hash only on sch:user@host:port
 			h := regHash.Hash(aor, int(hURI.Offs), int(hURI.Len))
@@ -872,6 +877,8 @@ func updateRegCache(event EventType, e *CallEntry, aor []byte, c []byte) (bool, 
 			// (if previous entry found)
 			if ce != nil {
 				cstHash.HTable[ce.hashNo].Lock()
+				// reset a possible delayed reg-del flag
+				ce.Flags &= ^CFRegDelDelayed
 				if ce.regBinding == rb {
 					//DBG("updateRegCache: handling old ce %p: %q:%q:%q regBinding %p next %p prev %p\n", ce, ce.Key.GetCallID(), ce.Key.GetFromTag(), ce.Key.GetToTag(), ce.regBinding, ce.next, ce.prev)
 					ce.regBinding = nil
@@ -880,7 +887,7 @@ func updateRegCache(event EventType, e *CallEntry, aor []byte, c []byte) (bool, 
 						csTimerUpdateTimeoutUnsafe(ce,
 							time.Duration(ce.State.TimeoutS())*time.Second,
 							FTimerUpdForce)
-						//  update ev. flags
+						//  update ev. flags (fake RegDel)
 						ce.EvFlags.Set(EvRegDel)
 						ce.lastEv = EvRegDel
 						//DBG("updateRegCache: quick expire old ce %p: %q:%q:%q regBinding %p new EvFlags %q\n", ce, ce.Key.GetCallID(), ce.Key.GetFromTag(), ce.Key.GetToTag(), ce.regBinding, ce.EvFlags.String())
@@ -903,71 +910,15 @@ func updateRegCache(event EventType, e *CallEntry, aor []byte, c []byte) (bool, 
 			event = EvNone
 		}
 	case EvRegDel:
-		// if a RegEntry is attached to the current CallEntry, delete it
-		cstHash.HTable[e.hashNo].Lock()
-		rb := e.regBinding
-		if rb != nil {
-			h := rb.hashNo
-			regHash.HTable[h].Lock()
-			if !regHash.HTable[h].Detached(rb) {
-				regHash.HTable[h].Rm(rb)
-				regHash.HTable[h].DecStats()
-				regHash.entries.Dec(1)
-				regHash.cnts.grp.Dec(regHash.cnts.hActive)
-				rb.ce = nil
-				rb.Unref() // no longer in the hash
-			}
-			regHash.HTable[h].Unlock()
-			e.regBinding = nil
-			rb.Unref() // no longer ref'ed from the CallEntry
-			e.Unref()  // no longer ref'ed from the RegEntry
-		}
-		cstHash.HTable[e.hashNo].Unlock()
-		// extra safety: delete all other matching reg bindings
-		// (if we did see all the registers there shouldn't be any left)
-
-		hURI := aorURI.Short() // hash only on sch:user@host:port
-		h := regHash.Hash(aor, int(hURI.Offs), int(hURI.Len))
-		for {
-			regHash.HTable[h].Lock()
-			if len(c) == 1 && c[0] == '*' {
-				// "*" contact - everything was deleted -> remove all contacts
-				// for the AOR
-				rb = regHash.HTable[h].FindURIUnsafe(&aorURI, aor)
-			} else {
-				rb = regHash.HTable[h].FindBindingUnsafe(&aorURI, aor, &cURI, c)
-			}
-			if rb == nil {
-				regHash.HTable[h].Unlock()
-				break
-			}
-			regHash.HTable[h].Rm(rb)
-			regHash.HTable[h].DecStats()
-			regHash.entries.Dec(1)
-			regHash.cnts.grp.Dec(regHash.cnts.hActive)
-			ce := rb.ce
-			rb.ce = nil
-			regHash.HTable[h].Unlock()
-			rb.Unref() // no longer in the hash
-			if ce != nil {
-				cstHash.HTable[ce.hashNo].Lock()
-				if ce.regBinding == rb {
-					ce.regBinding = nil
-					if !cstHash.HTable[ce.hashNo].Detached(ce) {
-						//  force short delete timeout
-						csTimerUpdateTimeoutUnsafe(ce,
-							time.Duration(ce.State.TimeoutS())*time.Second,
-							FTimerUpdForce)
-						//  update ev. flags
-						ce.EvFlags.Set(event)
-						ce.lastEv = event
-					} // else already detached on waiting for 0 refcnt =>
-					// do nothing
-					rb.Unref() // no longer ref'ed from the CallEntry
-				} // else somebody changed ce.regBinding in the meantime => bail out
-				cstHash.HTable[ce.hashNo].Unlock()
-				ce.Unref() // no longer ref'ed from the RegEntry
-			}
+		delDelay := GetCfg().RegDelDelay
+		if delDelay > 0 {
+			// delay all entries corresponding to matching contacts in the
+			// registration cache
+			regDelDelay(e, aorURI, aor, cURI, c, matchAll, TimeoutS(delDelay))
+			event = EvNone
+		} else {
+			regDelNow(e, aorURI, aor, cURI, c, matchAll)
+			// no change for the event
 		}
 	case EvRegExpired:
 		// nothing to do: from finalTimeoutEv we generate EvRegExpired only
@@ -977,6 +928,159 @@ func updateRegCache(event EventType, e *CallEntry, aor []byte, c []byte) (bool, 
 	}
 
 	return true, event
+}
+
+// regDelNow is a helper function for the case when a RegDel should be
+// handled immediately
+func regDelNow(e *CallEntry,
+	aorURI sipsp.PsipURI, aor []byte,
+	cURI sipsp.PsipURI, c []byte,
+	matchAll bool) {
+
+	// if a RegEntry is attached to the current CallEntry, delete it
+	cstHash.HTable[e.hashNo].Lock()
+	rb := e.regBinding
+	if rb != nil {
+		h := rb.hashNo
+		regHash.HTable[h].Lock()
+		if !regHash.HTable[h].Detached(rb) {
+			regHash.HTable[h].Rm(rb)
+			regHash.HTable[h].DecStats()
+			regHash.entries.Dec(1)
+			regHash.cnts.grp.Dec(regHash.cnts.hActive)
+			rb.ce = nil
+			rb.Unref() // no longer in the hash
+		}
+		regHash.HTable[h].Unlock()
+		e.regBinding = nil
+		rb.Unref() // no longer ref'ed from the CallEntry
+		e.Unref()  // no longer ref'ed from the RegEntry
+	}
+	cstHash.HTable[e.hashNo].Unlock()
+	// extra safety: delete all other matching reg bindings
+	// (if we did see all the registers there shouldn't be any left)
+
+	hURI := aorURI.Short() // hash only on sch:user@host:port
+	h := regHash.Hash(aor, int(hURI.Offs), int(hURI.Len))
+	for {
+		regHash.HTable[h].Lock()
+		if matchAll {
+			// "*" contact - everything was deleted -> remove all contacts
+			// for the AOR
+			rb = regHash.HTable[h].FindURIUnsafe(&aorURI, aor)
+		} else {
+			rb = regHash.HTable[h].FindBindingUnsafe(&aorURI, aor, &cURI, c)
+		}
+		if rb == nil {
+			regHash.HTable[h].Unlock()
+			break
+		}
+		regHash.HTable[h].Rm(rb)
+		regHash.HTable[h].DecStats()
+		regHash.entries.Dec(1)
+		regHash.cnts.grp.Dec(regHash.cnts.hActive)
+		ce := rb.ce
+		rb.ce = nil
+		regHash.HTable[h].Unlock()
+		rb.Unref() // no longer in the hash
+		if ce != nil {
+			cstHash.HTable[ce.hashNo].Lock()
+			if ce.regBinding == rb {
+				ce.regBinding = nil
+				if !cstHash.HTable[ce.hashNo].Detached(ce) {
+					//  force short delete timeout
+					csTimerUpdateTimeoutUnsafe(ce,
+						time.Duration(ce.State.TimeoutS())*time.Second,
+						FTimerUpdForce)
+					//  update ev. flags
+					// TODO: ? if !matchAll else don't set
+					// EvRegDel (generate one for every contact, set
+					//           CFRegDelDelayed?)
+					//
+					ce.EvFlags.Set(EvRegDel)
+					ce.lastEv = EvRegDel
+				} // else already detached on waiting for 0 refcnt =>
+				// do nothing
+				rb.Unref() // no longer ref'ed from the CallEntry
+			} // else somebody changed ce.regBinding in the meantime => bail out
+			cstHash.HTable[ce.hashNo].Unlock()
+			ce.Unref() // no longer ref'ed from the RegEntry
+		}
+	}
+}
+
+// regDelDelayed is a helper function for the case when a RegDel should be
+// delayed.
+func regDelDelay(e *CallEntry,
+	aorURI sipsp.PsipURI, aor []byte,
+	cURI sipsp.PsipURI, c []byte,
+	matchAll bool, delDelay TimeoutS) {
+
+	// if a RegEntry is attached to the current CallEntry mark it for
+	// delayed delete
+	cstHash.HTable[e.hashNo].Lock()
+	e.Flags |= CFRegDelDelayed
+	// don't update the timer here, the caller should update it for the
+	// "main" entry
+	cstHash.HTable[e.hashNo].Unlock()
+	// mark all other matching reg bindings
+	// (if we did see all the registers there shouldn't be any left, except
+	// for wildcard deletes)
+
+	hURI := aorURI.Short() // hash only on sch:user@host:port
+	h := regHash.Hash(aor, int(hURI.Offs), int(hURI.Len))
+	n := 128 // start with 128 entries
+retry:
+	mREntries := make([]*RegEntry, 0, n)
+	regHash.HTable[h].Lock()
+	if matchAll {
+		// "*" contact - everything was deleted -> mark all contacts
+		// for the AOR
+		n = regHash.HTable[h].MatchURIUnsafe(&aorURI, aor, &mREntries)
+	} else {
+		n = regHash.HTable[h].MatchBindingUnsafe(&aorURI, aor, &cURI, c,
+			&mREntries)
+	}
+	if n > cap(mREntries) {
+		regHash.HTable[h].Unlock()
+		n += 64 // extra space for possible new added entries
+		goto retry
+	}
+	if n <= 0 {
+		regHash.HTable[h].Unlock()
+		return // nothing found
+	}
+	mCEntries := make([]*CallEntry, n)
+	for i, re := range mREntries {
+		if re.ce != nil && re.ce != e { // skip over empty or the "main" entry
+			mCEntries[i] = re.ce
+			re.ce.Ref() // to be sure nobody deletes it in the same time
+		} else {
+			// "main" entry already "processed" above
+			mCEntries[i] = nil
+		}
+	}
+	regHash.HTable[h].Unlock()
+	for i, ce := range mCEntries {
+		if ce != nil {
+			cstHash.HTable[ce.hashNo].Lock()
+			if ce.regBinding == mREntries[i] {
+				// TODO: ? only for matchAll else silent del and mark
+				//  the buggy matching entry with an EvRegDel flag to
+				// avoid double RegDel generations?
+				ce.Flags |= CFRegDelDelayed // mark it for delayed RegDel
+				if !cstHash.HTable[ce.hashNo].Detached(ce) {
+					//  force delayed delete timeout
+					csTimerUpdateTimeoutUnsafe(ce,
+						time.Duration(delDelay)*time.Second,
+						FTimerUpdForce)
+				} // else already detached on waiting for 0 refcnt =>
+				// do nothing
+			} // else somebody changed ce.regBinding in the meantime => bail out
+			cstHash.HTable[ce.hashNo].Unlock()
+			ce.Unref() // relinquish our temporary ref from above
+		}
+	}
 }
 
 // newRegEntry allocates & fills a new reg cache entry.
