@@ -993,12 +993,19 @@ func regDelNow(e *CallEntry,
 						time.Duration(ce.State.TimeoutS())*time.Second,
 						FTimerUpdForce)
 					//  update ev. flags
-					// TODO: ? if !matchAll else don't set
-					// EvRegDel (generate one for every contact, set
-					//           CFRegDelDelayed?)
-					//
-					ce.EvFlags.Set(EvRegDel)
-					ce.lastEv = EvRegDel
+					if matchAll {
+						// if delete all contacts (*) mark other bindings
+						// as delayed delete, to generate reg-del for
+						// each contact on timer
+						ce.Flags |= CFRegDelDelayed
+					} else {
+						// else no * delete, but more matching bindings
+						// (bug/race should never happen), mark them as
+						// deleted but don't generate reg-del
+						// TODO: counter
+						ce.EvFlags.Set(EvRegDel)
+						ce.lastEv = EvRegDel
+					}
 				} // else already detached on waiting for 0 refcnt =>
 				// do nothing
 				rb.Unref() // no longer ref'ed from the CallEntry
@@ -1065,10 +1072,20 @@ retry:
 		if ce != nil {
 			cstHash.HTable[ce.hashNo].Lock()
 			if ce.regBinding == mREntries[i] {
-				// TODO: ? only for matchAll else silent del and mark
-				//  the buggy matching entry with an EvRegDel flag to
-				// avoid double RegDel generations?
-				ce.Flags |= CFRegDelDelayed // mark it for delayed RegDel
+				if matchAll {
+					// if delete all contacts (*) mark other bindings
+					// as delayed delete, to generate reg-del for
+					// each contact on timer
+					ce.Flags |= CFRegDelDelayed // mark it for delayed RegDel
+				} else {
+					// else no * delete, but more matching bindings
+					// (bug/race should never happen), mark them as
+					// deleted but don't generate reg-del
+					// TODO: counter
+					ce.EvFlags.Set(EvRegDel)
+					ce.lastEv = EvRegDel
+				}
+				// TODO: dbg max deleted counter
 				if !cstHash.HTable[ce.hashNo].Detached(ce) {
 					//  force delayed delete timeout
 					csTimerUpdateTimeoutUnsafe(ce,
