@@ -675,6 +675,7 @@ func finalTimeoutEv(e *CallEntry) EventType {
 		if e.Method == sipsp.MRegister {
 			if !e.EvFlags.Test(EvRegDel) {
 				if e.Flags&CFRegDelDelayed != 0 {
+					regHash.cnts.grp.Inc(regHash.cnts.hDelDelayedEv)
 					event = EvRegDel
 					// Possible behaviour change:
 					// to generate only one RegDel for a "*" delete instead

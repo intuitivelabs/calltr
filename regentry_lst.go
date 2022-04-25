@@ -459,6 +459,14 @@ type regStats struct {
 	hFailLimEx counters.Handle
 
 	hActive counters.Handle
+
+	hDelAllMaxB   counters.Handle
+	hDelMaxB      counters.Handle
+	hDelMaxM      counters.Handle
+	hDelDelayed   counters.Handle
+	hDelDelayedEv counters.Handle
+	hDelStar      counters.Handle
+	hNewDiffCid   counters.Handle
 }
 
 // hash table for reg entries (aor uri indexed)
@@ -481,6 +489,22 @@ func (h *RegEntryHash) Init(size int) {
 			"new registation binding creation attempt exceeded entries limit"},
 		{&h.cnts.hActive, counters.CntMaxF, nil, nil, "active",
 			"active registrations bindings"},
+
+		{&h.cnts.hDelAllMaxB, counters.CntMaxF, nil, nil,
+			"del_all_max_bindings",
+			"dbg: maxmimum deleted bindings by a reg-del *"},
+		{&h.cnts.hDelMaxB, counters.CntMaxF, nil, nil, "del_max_bindings",
+			"dbg: maxmimum deleted bindings by a normal 1 contact reg-del"},
+		{&h.cnts.hDelMaxM, counters.CntMaxF, nil, nil, "del_max_matching",
+			"dbg: maxmimum matching bindings  on a  reg-del"},
+		{&h.cnts.hDelDelayed, 0, nil, nil, "del_delayed",
+			"delayed reg-del (can be canceled by a quick reg new)"},
+		{&h.cnts.hDelDelayedEv, 0, nil, nil, "del_delayed_ev",
+			"dbg: del events generated due to delayed reg-del"},
+		{&h.cnts.hDelStar, 0, nil, nil, "del_star",
+			"register delete all: * contact"},
+		{&h.cnts.hNewDiffCid, 0, nil, nil, "refresh_diff_callid",
+			"register refresh with different callid"},
 	}
 	entries := 20 // extra space to allow registering more counters
 	if entries < len(regsCntDefs) {
