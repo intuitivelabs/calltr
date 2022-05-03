@@ -389,30 +389,39 @@ func forkCallEntry(e *CallEntry, m *sipsp.PSIPMsg, dir int, match CallMatchType,
 			// to-tag in the initial reply
 			// Note: that CallStNonInvNegReply should be catched by the
 			//       above if, it's here just for completeness/readability
-			if m.Method() == sipsp.MRegister && e.Method == sipsp.MRegister &&
-				(e.State == CallStNonInvFinished ||
-					e.State == CallStNonInvNegReply) &&
-				e.Key.TagSpace(int(e.Key.FromTag.Len), totagSpace) {
+			/* Disable fromtag REGISTER relaxed matching hack - should be
+			   handled by the reg-cache code (forking would be ok).
+				if m.Method() == sipsp.MRegister && e.Method == sipsp.MRegister &&
+					(e.State == CallStNonInvFinished ||
+						e.State == CallStNonInvNegReply) &&
+					e.Key.TagSpace(int(e.Key.FromTag.Len), totagSpace) {
+					// TODO: check for no reg binding or for matching contacts
+					//       and aor
 
-				// check for possible old retransmissions
-				if (m.Request() && reqRetr(e, m, dir)) ||
-					(!m.Request() && replRetr(e, m, dir)) {
-					// partial match that looks like a retr...=> do nothing
-					// let updateState to treat it as a retr.
-					return e
-				} else {
-					// not a retr. -> update ToTag
-					// update to-tag, if request or not 100
-					if m.Request() || m.FL.Status > 100 {
-						if !e.Key.SetToTag(newToTag.Get(m.Buf)) {
-							BUG("forkCallEntry: partial match to\n")
-							return nil
+					// check for possible old retransmissions
+					if (m.Request() && reqRetr(e, m, dir)) ||
+						(!m.Request() && replRetr(e, m, dir)) {
+						// partial match that looks like a retr...=> do nothing
+						// let updateState to treat it as a retr.
+						return e
+					} else {
+						// not a retr. -> update ToTag
+						// update to-tag, if request or not 100
+						if m.Request() || m.FL.Status > 100 {
+							if !e.Key.SetToTag(newToTag.Get(m.Buf)) {
+								BUG("forkCallEntry: partial match to\n")
+								return nil
+							}
 						}
+						// TODO: reset Flags, EvFlags and possible state
+						e.Flags |= CFRegReplacedHack | CFReused
+						// TODO: e.Flags &= ^CFRegDelDelayed
+						//       e.EvFlags.Clear(EvRegDel) ???
+						//       e.EvFlags.Clear(EvRegNew)  ???
+						return e
 					}
-					e.Flags |= CFRegReplacedHack | CFReused
-					return e
 				}
-			}
+			*/
 			// if message has no to-tag but partially matches something
 			// that does it can be:
 			//  1. re-trans of the original message
