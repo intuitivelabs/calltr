@@ -675,6 +675,15 @@ func ProcessMsg(m *sipsp.PSIPMsg, ni [2]NetInfo, f HandleEvF, evd *EventData,
 			case n == e:
 				// in-place update
 				e.Ref() // we return it
+				// since e is re-used -> reset not needed inherited
+				// call Flags and EvFlags
+				e.Flags &= ^CFRegMaskF // reset REGISTER related flags
+				// keep ev flags, don't want to regen. seen EVs in forked calls
+				// except for REGISTER (hack) - since register EVs are now
+				// handled by the register binding cache, we don't inherit
+				// them in forked or re-used REGISTER entries (which are
+				// caused by REGISTERs with different from or to-tag)
+				e.EvFlags &= ^EvRegMaskF
 				_, to, toF, ev = updateState(e, m, dir)
 				csTimerUpdateTimeoutUnsafe(e,
 					time.Duration(to)*time.Second, toF)
@@ -842,6 +851,7 @@ func updateRegCache(event EventType, e *CallEntry, aor []byte, c []byte) (bool, 
 				//   CallId for an // existing aor,contact pair => do not generate
 				// an EvRegNew
 				event = EvNone
+				e.Flags |= CFRegBSeen // somebody else has it => steal it
 				// remove from hash
 				regHash.HTable[h].Rm(rb)
 				regHash.HTable[h].DecStats()
@@ -887,6 +897,7 @@ func updateRegCache(event EventType, e *CallEntry, aor []byte, c []byte) (bool, 
 				if ce.regBinding == rb {
 					//DBG("updateRegCache: handling old ce %p: %q:%q:%q regBinding %p next %p prev %p\n", ce, ce.Key.GetCallID(), ce.Key.GetFromTag(), ce.Key.GetToTag(), ce.regBinding, ce.next, ce.prev)
 					ce.regBinding = nil
+					ce.Flags |= CFRegBStolen
 					if !cstHash.HTable[ce.hashNo].Detached(ce) {
 						//  force short delete timeout
 						csTimerUpdateTimeoutUnsafe(ce,

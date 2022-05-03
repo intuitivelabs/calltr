@@ -344,6 +344,10 @@ const (
 	CFForcedTimeout    // terminated due to forced timeout
 	CFCalleeTerminated // call terminated by callee
 	CFRegDelDelayed    // generate a "delayed" reg-del on timeout
+	CFRegBStolen       // dbg: associated reg cache binding stolen by new reg
+	CFRegBSeen         // dbg: reg binding already in the cache -> steal it
+
+	CFRegMaskF CallFlags = CFRegDelDelayed | CFRegBStolen | CFRegBSeen
 )
 
 // debugging, keep in sync with the CallFlags consts above
@@ -360,6 +364,8 @@ var cfNames = [...]string{
 	"Forced_Timeout",
 	"Callee_Terminated",
 	"Delayed_RegDel",
+	"Stolen_RegBinding",
+	"Cached_RegBinding",
 	"invalid",
 	"invalid",
 	"invalid",
