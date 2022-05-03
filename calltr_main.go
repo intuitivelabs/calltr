@@ -470,7 +470,7 @@ func forkCallEntry(e *CallEntry, m *sipsp.PSIPMsg, dir int, match CallMatchType,
 		n.Info.AddFromCi(&e.Info)
 		n.Flags |= CFForkChild
 		e.Flags |= CFForkParent
-		//n.EvFlags = e.EvFlags
+		// don't inherit any normal call Flags
 		// keep ev flags, don't want to regen. seen EVs in forked calls
 		// exception: REGISTER hack - since register EVs are now handled by the
 		//  register binding cache, we don't inherit them in forked REGISTER
@@ -882,6 +882,8 @@ func updateRegCache(event EventType, e *CallEntry, aor []byte, c []byte) (bool, 
 				cstHash.HTable[ce.hashNo].Lock()
 				// reset a possible delayed reg-del flag
 				ce.Flags &= ^CFRegDelDelayed
+				// and  a possible generated EvRegNew flag (more for dbg)
+				ce.EvFlags.Clear(EvRegNew)
 				if ce.regBinding == rb {
 					//DBG("updateRegCache: handling old ce %p: %q:%q:%q regBinding %p next %p prev %p\n", ce, ce.Key.GetCallID(), ce.Key.GetFromTag(), ce.Key.GetToTag(), ce.regBinding, ce.next, ce.prev)
 					ce.regBinding = nil
@@ -918,7 +920,10 @@ func updateRegCache(event EventType, e *CallEntry, aor []byte, c []byte) (bool, 
 			// delay all entries corresponding to matching contacts in the
 			// registration cache
 			regDelDelay(e, aorURI, aor, cURI, c, matchAll, TimeoutS(delDelay))
+			// no event generated now
 			event = EvNone
+			// clear the RegDel generated flag...
+			e.EvFlags.Clear(EvRegDel)
 		} else {
 			regDelNow(e, aorURI, aor, cURI, c, matchAll)
 			// no change for the event
@@ -1003,17 +1008,20 @@ func regDelNow(e *CallEntry,
 						time.Duration(ce.State.TimeoutS())*time.Second,
 						FTimerUpdForce)
 					//  update ev. flags
-					if matchAll {
+					if matchAll && !ce.EvFlags.Test(EvRegDel) {
 						// if delete all contacts (*) mark other bindings
 						// as delayed delete, to generate reg-del for
 						// each contact on timer
 						ce.Flags |= CFRegDelDelayed
+						ce.EvFlags.Clear(EvRegNew) // dbg: rst a possible RegNew
 						delayed++
 					} else {
 						// else no * delete, but more matching bindings
 						// (bug/race should never happen), mark them as
 						// deleted but don't generate reg-del
+						ce.Flags &= ^CFRegDelDelayed
 						ce.EvFlags.Set(EvRegDel)
+						ce.EvFlags.Clear(EvRegNew) // dbg: rst a possible RegNew
 						ce.lastEv = EvRegDel
 					}
 				} // else already detached on waiting for 0 refcnt =>
@@ -1042,16 +1050,29 @@ func regDelDelay(e *CallEntry,
 
 	delayed := 0
 	deleted := 0
+	matching := 0
 	// if a RegEntry is attached to the current CallEntry mark it for
 	// delayed delete
 	cstHash.HTable[e.hashNo].Lock()
 	if e.regBinding != nil {
 		// reg corresp to e.regBinding is deleted outside
 		// this function
-		delayed++
 		deleted++
+		e.Flags |= CFRegDelDelayed
+		delayed++ // e always delay-deleted
+	} else {
+		if !matchAll {
+			// reg-del entry (e) did not match an existing reg-new entry with
+			// an associated reg cache entry => mark the reg-del entry as
+			// del-delayed and latter mark any other entry as already deleted
+			// (EvRegDel)+reset CFDelDelayed (see below when searching for
+			// matching entries in the reg cache)
+			e.Flags |= CFRegDelDelayed
+			delayed++ // e always delay-deleted
+			// deleted++ // no cached reg binding is deleted
+		}
+		// else if matchAll (* contact) no reg-del for this entry
 	}
-	e.Flags |= CFRegDelDelayed
 	// don't update the timer here, the caller should update it for the
 	// "main" entry
 	cstHash.HTable[e.hashNo].Unlock()
@@ -1062,6 +1083,7 @@ func regDelDelay(e *CallEntry,
 	hURI := aorURI.Short() // hash only on sch:user@host:port
 	h := regHash.Hash(aor, int(hURI.Offs), int(hURI.Len))
 	n := 128 // start with 128 entries
+	var mCEntries []*CallEntry
 retry:
 	mREntries := make([]*RegEntry, 0, n)
 	regHash.HTable[h].Lock()
@@ -1080,10 +1102,10 @@ retry:
 	}
 	if n <= 0 {
 		regHash.HTable[h].Unlock()
-		return // nothing found
+		goto end // nothing found
 	}
-	matching := n
-	mCEntries := make([]*CallEntry, n)
+	matching = n
+	mCEntries = make([]*CallEntry, n)
 	for i, re := range mREntries {
 		if re.ce != nil && re.ce != e { // skip over empty or the "main" entry
 			mCEntries[i] = re.ce
@@ -1098,17 +1120,20 @@ retry:
 		if ce != nil {
 			cstHash.HTable[ce.hashNo].Lock()
 			if ce.regBinding == mREntries[i] {
-				if matchAll {
+				if matchAll && !ce.EvFlags.Test(EvRegDel) {
 					// if delete all contacts (*) mark other bindings
 					// as delayed delete, to generate reg-del for
 					// each contact on timer
 					ce.Flags |= CFRegDelDelayed // mark it for delayed RegDel
+					ce.EvFlags.Clear(EvRegNew)  // dbg: rst a possible RegNew
 					delayed++
 				} else {
 					// else no * delete, but more matching bindings
 					// (bug/race should never happen), mark them as
 					// deleted but don't generate reg-del
+					ce.Flags &= ^CFRegDelDelayed
 					ce.EvFlags.Set(EvRegDel)
+					ce.EvFlags.Clear(EvRegNew) // dbg: rst a possible RegNew
 					ce.lastEv = EvRegDel
 				}
 				if !cstHash.HTable[ce.hashNo].Detached(ce) {
@@ -1124,6 +1149,7 @@ retry:
 			ce.Unref() // relinquish our temporary ref from above
 		}
 	}
+end:
 	regHash.cnts.grp.Set(regHash.cnts.hDelMaxM, counters.Val(matching))
 	if matchAll {
 		regHash.cnts.grp.Set(regHash.cnts.hDelAllMaxB, counters.Val(deleted))

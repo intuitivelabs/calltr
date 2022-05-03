@@ -673,17 +673,27 @@ func finalTimeoutEv(e *CallEntry) EventType {
 		// else if REGISTER, like above, do nothing
 	case CallStNonInvFinished:
 		if e.Method == sipsp.MRegister {
-			if !e.EvFlags.Test(EvRegDel) {
-				if e.Flags&CFRegDelDelayed != 0 {
+			// check for delayed reg-del
+			if e.Flags&CFRegDelDelayed != 0 {
+				if e.EvFlags.Test(EvRegNew) {
+					BUG("CFRegDelDelayed & RegNew on the same entry: "+
+						" %p Flags %q EvFlags %q\n", e, e.Flags, e.EvFlags)
+				}
+				if e.EvFlags.Test(EvRegDel) {
+					WARN("CFRegDelDelayed & EvRgDel on the same entry: "+
+						" %p Flags %q EvFlags %q\n", e, e.Flags, e.EvFlags)
+				} else {
 					regHash.cnts.grp.Inc(regHash.cnts.hDelDelayedEv)
-					event = EvRegDel
-					// Possible behaviour change:
-					// to generate only one RegDel for a "*" delete instead
-					// of one for each contact,
-					// we would need to mark the call entry with a new flag
-					// and then delete all the matching entries referenced
-					// from the reg cache for the aor
-				} else if e.EvFlags.Test(EvRegNew) {
+				}
+				event = EvRegDel
+				// Possible behaviour change:
+				// to generate only one RegDel for a "*" delete instead
+				// of one for each contact,
+				// we would need to mark the call entry with a new flag
+				// and then delete all the matching entries referenced
+				// from the reg cache for the aor
+			} else if !e.EvFlags.Test(EvRegDel) {
+				if e.EvFlags.Test(EvRegNew) {
 					// for EvRegNew without an EvRegDel:
 					event = EvRegExpired
 				} // else reg-fetch/ping => ignore
@@ -830,8 +840,8 @@ func handleRegRepl(e *CallEntry, m *sipsp.PSIPMsg) (event EventType, to TimeoutS
 		e.EvFlags.Clear(EvRegNew) // clear RegNew to see them after a del
 		delDelay := GetCfg().RegDelDelay
 		if delDelay > 0 {
-			to = TimeoutS(delDelay)
-			e.Flags |= CFRegDelDelayed
+			to += TimeoutS(delDelay)
+			// e.Flags |= CFRegDelDelayed // set later in updateRegCache
 		}
 	}
 	return
