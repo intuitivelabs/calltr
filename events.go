@@ -116,7 +116,7 @@ func (f *EventFlags) ResetAll() {
 	*f = 0
 }
 
-func (f *EventFlags) String() string {
+func (f EventFlags) String() string {
 	var s string
 	for e := EvNone + 1; e < EvBad; e++ {
 		if f.Test(e) {
