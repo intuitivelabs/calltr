@@ -828,7 +828,14 @@ func updateRegCache(event EventType, e *CallEntry, aor []byte, c []byte) (bool, 
 	case EvRegNew:
 		cstHash.HTable[e.hashNo].Lock()
 		// reset a possible delayed reg-del flag
-		e.Flags &= ^CFRegDelDelayed
+		if e.Flags&CFRegDelDelayed != 0 {
+			e.Flags &= ^CFRegDelDelayed
+			if !e.EvFlags.Test(EvRegDel) {
+				// if no RegDel generated, don't generate an EvRegNew
+				// if this entry was on delayed delete
+				event = EvNone
+			}
+		}
 		if e.regBinding == nil {
 			hURI := aorURI.Short() // hash only on sch:user@host:port
 			h := regHash.Hash(aor, int(hURI.Offs), int(hURI.Len))
