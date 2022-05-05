@@ -830,14 +830,19 @@ func handleRegRepl(e *CallEntry, m *sipsp.PSIPMsg) (event EventType, to TimeoutS
 		event = EvRegDel
 		to = 0
 	}
-	// aor := m.PV.GetTo().URI.Get(m.Buf) // byte slice w/ To uri
-	if event == EvRegNew {
-		// HACK: it's a new REG, in case this is an old
-		// recycled entry clear the EvRegDel flag
-		e.EvFlags.Clear(EvRegDel)
-		e.Flags &= ^CFRegDelDelayed
-	} else if event == EvRegDel {
-		e.EvFlags.Clear(EvRegNew) // clear RegNew to see them after a del
+	// the EvReg* flag fixing moved in updateRegCache()
+	/*
+		if event == EvRegNew {
+			// HACK: it's a new REG, in case this is an old
+			// recycled entry clear the EvRegDel flag
+			e.EvFlags.Clear(EvRegDel)
+			e.Flags &= ^CFRegDelDelayed
+		} else */
+	if event == EvRegDel {
+		// flag fixing move in updateRegCache()/regDelNow() & regDelDelayed()
+		/*
+			e.EvFlags.Clear(EvRegNew) // clear RegNew to see them after a del
+		*/
 		delDelay := GetCfg().RegDelDelay
 		if delDelay > 0 {
 			to += TimeoutS(delDelay)
