@@ -678,10 +678,10 @@ func finalTimeoutEv(e *CallEntry) EventType {
 				if e.EvFlags.Test(EvRegNew) {
 					BUG("CFRegDelDelayed & RegNew on the same entry: "+
 						" %p Flags %q EvFlags %q\n", e, e.Flags, e.EvFlags)
+					regHash.cnts.grp.Inc(regHash.cnts.hDelDelayedNew)
 				}
 				if e.EvFlags.Test(EvRegDel) {
-					WARN("CFRegDelDelayed & EvRgDel on the same entry: "+
-						" %p Flags %q EvFlags %q\n", e, e.Flags, e.EvFlags)
+					regHash.cnts.grp.Inc(regHash.cnts.hDelDelayedDel)
 				} else {
 					regHash.cnts.grp.Inc(regHash.cnts.hDelDelayedEv)
 				}

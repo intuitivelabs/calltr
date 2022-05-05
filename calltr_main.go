@@ -741,7 +741,13 @@ endLocked:
 		} else {
 			// empty contact valid for a RegDel: e.g. seen only the
 			// reply or a reg ping with no contacts
-			if ev != EvRegDel {
+			if len(contact) == 0 {
+				regHash.cnts.grp.Inc(regHash.cnts.hRegNoC)
+			}
+			if len(aor) == 0 {
+				regHash.cnts.grp.Inc(regHash.cnts.hRegNoAOR)
+			}
+			if true /*ev != EvRegDel*/ {
 				BUG("calltr.ProcessMsg: empty aor (%q) or contact(%q) for %p:"+
 					" ev %d (%q last %q prev) state %q (%q) prev msgs %q "+
 					"cid %q msg:\n%q\n",
@@ -752,6 +758,18 @@ endLocked:
 					e.Key.GetCallID(), m.Buf)
 				ev = EvNone
 			}
+			// TODO: force ev = EvNove ?
+			// Case 1: no contact in callstate (orig req?)
+			//         here either no contact in orig request (reg-fetch?) or
+			//         only reply seen
+			//         (since we set Reg* event type only on reply)
+			//         We catch reg-fetch before (when updating stats on
+			//         reg reply) => we should not get a RegNew here and
+			//         not an EvRegExpired => we could get only EvRegDel
+			//         (TODO check if EvRegDel can be generated w/o a contact
+			//          in req or on reply out-of-the-blue -> check
+			//          handleRegRepl()).
+			// Case 2: no to/aor in reply => broken
 		}
 	}
 	if ev != EvNone && evd != nil {
@@ -834,7 +852,12 @@ func updateRegCache(event EventType, e *CallEntry, aor []byte, c []byte) (bool, 
 				// if no RegDel generated, don't generate an EvRegNew
 				// if this entry was on delayed delete
 				event = EvNone
+				regHash.cnts.grp.Inc(regHash.cnts.hNewMDelayedE)
 			}
+		}
+		if e.EvFlags.Test(EvRegDel) {
+			regHash.cnts.grp.Inc(regHash.cnts.hNewAfterDel)
+			e.EvFlags.Clear(EvRegDel)
 		}
 		if e.regBinding == nil {
 			hURI := aorURI.Short() // hash only on sch:user@host:port
@@ -906,6 +929,9 @@ func updateRegCache(event EventType, e *CallEntry, aor []byte, c []byte) (bool, 
 			// (if previous entry found)
 			if ce != nil {
 				cstHash.HTable[ce.hashNo].Lock()
+				if ce.Flags&CFRegDelDelayed != 0 {
+					regHash.cnts.grp.Inc(regHash.cnts.hNewMDelayedC)
+				}
 				// reset a possible delayed reg-del flag
 				ce.Flags &= ^CFRegDelDelayed
 				// and  a possible generated EvRegNew flag (more for dbg)
@@ -925,7 +951,10 @@ func updateRegCache(event EventType, e *CallEntry, aor []byte, c []byte) (bool, 
 						//DBG("updateRegCache: quick expire old ce %p: %q:%q:%q regBinding %p new EvFlags %q\n", ce, ce.Key.GetCallID(), ce.Key.GetFromTag(), ce.Key.GetToTag(), ce.regBinding, ce.EvFlags.String())
 					} // else already detached on waiting for 0 refcnt => nop
 					rb.Unref() // no longer ref'ed from the CallEntry
-				} // else somebody already removed ce.regBinding => bail out
+				} else {
+					// else somebody already removed ce.regBinding => bail out
+					regHash.cnts.grp.Inc(regHash.cnts.hNewBRace)
+				}
 				cstHash.HTable[ce.hashNo].Unlock()
 				ce.Unref() // no longer ref'ed from the RegEntry
 			}
@@ -976,7 +1005,12 @@ func regDelNow(e *CallEntry,
 	deleted := 0
 	// if a RegEntry is attached to the current CallEntry, delete it
 	cstHash.HTable[e.hashNo].Lock()
+	if e.EvFlags.Test(EvRegNew) {
+		e.EvFlags.Clear(EvRegNew)
+		regHash.cnts.grp.Inc(regHash.cnts.hDelAfterNew)
+	}
 	rb := e.regBinding
+	hasBinding := (rb != nil)
 	if rb != nil {
 		matching++
 		h := rb.hashNo
@@ -1064,6 +1098,11 @@ func regDelNow(e *CallEntry,
 		regHash.cnts.grp.Set(regHash.cnts.hDelAllMaxB, counters.Val(deleted))
 	} else {
 		regHash.cnts.grp.Set(regHash.cnts.hDelMaxB, counters.Val(deleted))
+		if matching == 0 {
+			regHash.cnts.grp.Inc(regHash.cnts.hDelNoMatch)
+		} else if hasBinding && matching == 1 {
+			regHash.cnts.grp.Inc(regHash.cnts.hDelNoCached)
+		}
 	}
 	regHash.cnts.grp.Add(regHash.cnts.hDelDelayed, counters.Val(delayed))
 }
@@ -1081,6 +1120,14 @@ func regDelDelay(e *CallEntry,
 	// if a RegEntry is attached to the current CallEntry mark it for
 	// delayed delete
 	cstHash.HTable[e.hashNo].Lock()
+	if e.EvFlags.Test(EvRegNew) {
+		e.EvFlags.Clear(EvRegNew)
+		regHash.cnts.grp.Inc(regHash.cnts.hDelAfterNew)
+	}
+	if e.Flags&CFRegDelDelayed != 0 {
+		regHash.cnts.grp.Inc(regHash.cnts.hDelMDelayedE)
+	}
+	noBinding := (e.regBinding == nil)
 	if e.regBinding != nil {
 		// reg corresp to e.regBinding is deleted outside
 		// this function
@@ -1129,6 +1176,12 @@ retry:
 	}
 	if n <= 0 {
 		regHash.HTable[h].Unlock()
+		if !matchAll {
+			regHash.cnts.grp.Inc(regHash.cnts.hDelNoCached)
+			if noBinding {
+				regHash.cnts.grp.Inc(regHash.cnts.hDelNoMatch)
+			}
+		}
 		goto end // nothing found
 	}
 	matching = n
@@ -1156,8 +1209,13 @@ retry:
 					delayed++
 				} else {
 					// else no * delete, but more matching bindings
-					// (bug/race should never happen), mark them as
-					// deleted but don't generate reg-del
+					// (at most 1 should be ok - diff callid, but more then
+					//  1 possible bug if !matchAll)
+					// mark them as deleted but don't generate reg-del
+					if !ce.EvFlags.Test(EvRegDel) &&
+						ce.Flags&CFRegDelDelayed != 0 {
+						regHash.cnts.grp.Inc(regHash.cnts.hDelMDelayedC)
+					}
 					ce.Flags &= ^CFRegDelDelayed
 					ce.EvFlags.Set(EvRegDel)
 					ce.EvFlags.Clear(EvRegNew) // dbg: rst a possible RegNew
@@ -1177,11 +1235,12 @@ retry:
 		}
 	}
 end:
-	regHash.cnts.grp.Set(regHash.cnts.hDelMaxM, counters.Val(matching))
 	if matchAll {
 		regHash.cnts.grp.Set(regHash.cnts.hDelAllMaxB, counters.Val(deleted))
+		// don't set DelMaxM for * delete
 	} else {
 		regHash.cnts.grp.Set(regHash.cnts.hDelMaxB, counters.Val(deleted))
+		regHash.cnts.grp.Set(regHash.cnts.hDelMaxM, counters.Val(matching))
 	}
 	regHash.cnts.grp.Add(regHash.cnts.hDelDelayed, counters.Val(delayed))
 }

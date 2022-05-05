@@ -460,13 +460,26 @@ type regStats struct {
 
 	hActive counters.Handle
 
-	hDelAllMaxB   counters.Handle
-	hDelMaxB      counters.Handle
-	hDelMaxM      counters.Handle
-	hDelDelayed   counters.Handle
-	hDelDelayedEv counters.Handle
-	hDelStar      counters.Handle
-	hNewDiffCid   counters.Handle
+	hDelAllMaxB    counters.Handle
+	hDelMaxB       counters.Handle
+	hDelMaxM       counters.Handle
+	hDelDelayed    counters.Handle
+	hDelDelayedEv  counters.Handle
+	hDelStar       counters.Handle
+	hDelNoMatch    counters.Handle
+	hDelNoCached   counters.Handle
+	hNewMDelayedC  counters.Handle
+	hNewMDelayedE  counters.Handle
+	hNewAfterDel   counters.Handle
+	hDelAfterNew   counters.Handle
+	hDelDelayedNew counters.Handle
+	hDelDelayedDel counters.Handle
+	hDelMDelayedC  counters.Handle
+	hDelMDelayedE  counters.Handle
+	hNewDiffCid    counters.Handle
+	hNewBRace      counters.Handle
+	hRegNoC        counters.Handle
+	hRegNoAOR      counters.Handle
 }
 
 // hash table for reg entries (aor uri indexed)
@@ -503,8 +516,34 @@ func (h *RegEntryHash) Init(size int) {
 			"dbg: del events generated due to delayed reg-del"},
 		{&h.cnts.hDelStar, 0, nil, nil, "del_star",
 			"register delete all: * contact"},
+		{&h.cnts.hDelNoMatch, 0, nil, nil, "del_no_match",
+			"dbg: register delete not matching anything existing"},
+		{&h.cnts.hDelNoCached, 0, nil, nil, "del_no_cached",
+			"dbg: register delete not matching any cached binding"},
+		{&h.cnts.hNewMDelayedC, 0, nil, nil, "new_match_delayed_b",
+			"dbg: register new matches /overwrites a delayed reg-del binding"},
+		{&h.cnts.hNewMDelayedE, 0, nil, nil, "new_match_delayed_e",
+			"dbg: register new matches directly a delayed reg-del entry"},
+		{&h.cnts.hNewAfterDel, 0, nil, nil, "new_after_del",
+			"dbg: register new on entry (callid) with RegDel"},
+		{&h.cnts.hDelAfterNew, 0, nil, nil, "del_after_new",
+			"dbg: register delete on same entry (callid) with RegNew"},
+		{&h.cnts.hDelDelayedNew, 0, nil, nil, "del_dlyd_new_entry",
+			"dbg: del delayed and new flags on the same entry: problem?"},
+		{&h.cnts.hDelDelayedDel, 0, nil, nil, "del_dlyd_del_entry",
+			"dbg: del delayed and del flags on the same entry"},
+		{&h.cnts.hDelMDelayedC, 0, nil, nil, "del_match_delayed_b",
+			"dbg: register del matches a delayed reg-del binding"},
+		{&h.cnts.hDelMDelayedE, 0, nil, nil, "del_match_delayed_e",
+			"dbg: register del matches directly a delayed reg-del entry"},
 		{&h.cnts.hNewDiffCid, 0, nil, nil, "refresh_diff_callid",
 			"register refresh with different callid"},
+		{&h.cnts.hNewBRace, 0, nil, nil, "new_binding_race",
+			"reg binding stolen - benign race"},
+		{&h.cnts.hRegNoC, 0, nil, nil, "ev_no_contact",
+			"reg event, but no contact in the call entry"},
+		{&h.cnts.hRegNoAOR, 0, nil, nil, "ev_no_aor",
+			"reg event, but no aor in the message"},
 	}
 	entries := 20 // extra space to allow registering more counters
 	if entries < len(regsCntDefs) {
