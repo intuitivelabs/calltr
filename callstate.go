@@ -385,6 +385,9 @@ func (cf CallFlags) String() string {
 	return s
 }
 
+// CallAttrF contains flags correpding to CallAttrIdx values.
+type CallAttrF uint32
+
 type CallAttrIdx uint8
 
 const (
@@ -420,6 +423,10 @@ func (a CallAttrIdx) String() string {
 		return callAttrTStr[AttrLast]
 	}
 	return callAttrTStr[a]
+}
+
+func (a CallAttrIdx) Flag() CallAttrF {
+	return CallAttrF(1 << a)
 }
 
 type AttrLenRange struct {
@@ -635,7 +642,9 @@ func FillAttrsSrc(m *sipsp.PSIPMsg, dir int, src *[AttrLast]*sipsp.PField) {
 	}
 }
 
-func (ci *CallInfo) AddFromMsg(m *sipsp.PSIPMsg, dir int) int {
+// AddFromMsg fills not set call attrs. from a message, ignoring the ones
+// specified as flags in "mask".
+func (ci *CallInfo) AddFromMsg(m *sipsp.PSIPMsg, dir int, mask CallAttrF) int {
 
 	var s int
 	type dstField struct {
@@ -648,6 +657,10 @@ func (ci *CallInfo) AddFromMsg(m *sipsp.PSIPMsg, dir int) int {
 		if src[i] == nil {
 			continue
 		}
+		// skip over attr if present in the mask
+		if CallAttrIdx(i).Flag()&mask != 0 {
+			continue
+		}
 		n := addPField(src[i], m.Buf, &ci.Attrs[i], &ci.buf, &ci.used,
 			int(AttrSpace[i].Max))
 		if n > 0 {
@@ -657,12 +670,16 @@ func (ci *CallInfo) AddFromMsg(m *sipsp.PSIPMsg, dir int) int {
 	return s
 }
 
-// Set / copy attrinbutes from another callinfo, ignoring attributes that
-// are already set.
-func (ci *CallInfo) AddFromCi(si *CallInfo) int {
+// AddFromCi sets / copies attrinbutes from another callinfo, ignoring
+// attributes that are already set or are present as flags in "mask",
+func (ci *CallInfo) AddFromCi(si *CallInfo, mask CallAttrF) int {
 	ret := 0
 	for i := 0; i < len(ci.Attrs); i++ {
 		if si.Attrs[i].Empty() {
+			continue
+		}
+		// skip over attr if present in the mask
+		if CallAttrIdx(i).Flag()&mask != 0 {
 			continue
 		}
 		n := ci.AddAttrField(CallAttrIdx(i), &si.Attrs[i], si.buf)

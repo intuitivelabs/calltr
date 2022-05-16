@@ -217,7 +217,7 @@ func newCallEntry(hashNo, cseq uint32, m *sipsp.PSIPMsg,
 			goto error
 		}
 	}
-	e.Info.AddFromMsg(m, dir)
+	e.Info.AddFromMsg(m, dir, 0)
 	e.State = CallStNone
 	chgState(e, CallStInit, dir)
 	csTimerInitUnsafe(e, time.Duration(e.State.TimeoutS())*time.Second)
@@ -476,7 +476,7 @@ func forkCallEntry(e *CallEntry, m *sipsp.PSIPMsg, dir int, match CallMatchType,
 		n.CreatedTS = e.CreatedTS    // debugging
 		n.forkedTS = timestamp.Now() // debugging
 		// not sure about keeping Attrs Reason (?)
-		n.Info.AddFromCi(&e.Info)
+		n.Info.AddFromCi(&e.Info, 0)
 		n.Flags |= CFForkChild
 		e.Flags |= CFForkParent
 		// don't inherit any normal call Flags

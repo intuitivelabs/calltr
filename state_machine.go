@@ -303,7 +303,12 @@ end:
 	e.lastMsgs.AddReq(mmethod, dir, false, 1)
 	chgState(e, newState, dir)
 	// add extra event attributes from msg that are not already set
-	e.Info.AddFromMsg(m, dir)
+	e.Info.AddFromMsg(m, dir, 0)
+	// TODO: it would be cleaner to move updateEvent() just before event
+	//       generation (end of ProcessMsg() and on finalTimeoutEv()).
+	//       (this would avoid marking an event as being generated via
+	//        the CallEntry.EvFlags just to reset it later when we decide
+	//        to drop it, e.g. in the reg-del delayed case)
 	event = updateEvent(event, e)
 	if event != EvNone {
 		e.evGen = EvGenReq
@@ -583,7 +588,16 @@ func updateStateRepl(e *CallEntry, m *sipsp.PSIPMsg, dir int) (CallState, Timeou
 	e.prevState.Add(e.State)
 	chgState(e, newState, dir)
 	// add extra event attributes from msg that are not already set
-	e.Info.AddFromMsg(m, dir)
+	// Note: a reply to a reg fetch will should not cause the contact of
+	//        the entry to be filled with the 1st contact.
+	// Note2: in general disallow missing contacts to be filled from
+	//        replies.
+	e.Info.AddFromMsg(m, dir, AttrContact.Flag())
+	// TODO: it would be cleaner to move updateEvent() just before event
+	//       generation (end of ProcessMsg() and on finalTimeoutEv()).
+	//       (this would avoid marking an event as being generated via
+	//        the CallEntry.EvFlags just to reset it later when we decide
+	//        to drop it, e.g. in the reg-del delayed case)
 	event = updateEvent(event, e)
 	if event != EvNone {
 		e.evGen = EvGenRepl
