@@ -735,6 +735,50 @@ endLocked:
 		copy(aor, a)
 		copy(contact, c)
 		if len(aor) != 0 && len(contact) != 0 {
+			// FIXME: dbg tests: msg contact matches saved contact
+			savedAOR := e.Info.Attrs[AttrToURI].Get(e.Info.buf)
+			var mAORuri, savedAORuri sipsp.PsipURI
+			err1, _ := sipsp.ParseURI(aor, &mAORuri)
+			err2, _ := sipsp.ParseURI(savedAOR, &savedAORuri)
+
+			if (err1 == 0 && err2 == 0 &&
+				!sipsp.URICmpShort(&mAORuri, aor, &savedAORuri, savedAOR,
+					sipsp.URICmpAll)) || (err1 != err2) {
+				WARN("XXX: %s on entry %p callid %q f: %q t : %q"+
+					" aor %q not matching msg to aor %q\n",
+					ev, e, e.Key.GetCallID(), e.Key.GetFromTag(),
+					e.Key.GetToTag(), savedAOR, aor)
+				regHash.cnts.grp.Inc(regHash.cnts.hEntDiffAOR)
+			}
+			if e.regBinding != nil {
+				// dbg test2: binding contact matches entry contact
+				// e.regBinding is refCnted & read-only => safe to read directly (?)
+				bC := e.regBinding.Contact.Get(e.regBinding.buf)
+				bAOR := e.regBinding.AOR.Get(e.regBinding.buf)
+				var eCuri, bCuri, bAORuri sipsp.PsipURI
+				err3, _ := sipsp.ParseURI(c, &eCuri)
+				err4, _ := sipsp.ParseURI(bC, &bCuri)
+				err5, _ := sipsp.ParseURI(bAOR, &bAORuri)
+				if (err3 == 0 && err4 == 0 &&
+					!sipsp.URICmpShort(&bCuri, bC, &eCuri, c,
+						sipsp.URICmpSkipPort)) || (err3 != err4) {
+					WARN("XXX: %s on entry %p callid %q f: %q t : %q"+
+						" c %q not matching binding c: %q\n",
+						ev, e, e.Key.GetCallID(), e.Key.GetFromTag(),
+						e.Key.GetToTag(), c, bC)
+					regHash.cnts.grp.Inc(regHash.cnts.hBndDiffC)
+				}
+				// dbg test3: binding aor matches entry aor
+				if (err5 == 0 && err2 == 0 &&
+					!sipsp.URICmpShort(&bAORuri, bAOR, &savedAORuri, savedAOR,
+						sipsp.URICmpAll)) || (err5 != err2) {
+					WARN("XXX: %s on entry %p callid %q f: %q t : %q"+
+						" aor %q not matching binding aor: %q\n",
+						ev, e, e.Key.GetCallID(), e.Key.GetFromTag(),
+						e.Key.GetToTag(), savedAOR, bAOR)
+					regHash.cnts.grp.Inc(regHash.cnts.hBndDiffAOR)
+				}
+			}
 			cstHash.HTable[hashNo].Unlock()
 			_, ev = updateRegCache(ev, e, aor, contact)
 			cstHash.HTable[hashNo].Lock()

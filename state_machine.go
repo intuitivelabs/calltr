@@ -220,6 +220,29 @@ func updateStateReq(e *CallEntry, m *sipsp.PSIPMsg, dir int) (CallState, Timeout
 					// update Contact...
 					if mmethod == sipsp.MRegister {
 						if mC := m.PV.Contacts.GetContact(0); mC != nil {
+							if !e.Info.Attrs[AttrContact].Empty() {
+								savedC :=
+									e.Info.Attrs[AttrContact].Get(e.Info.buf)
+								c := mC.URI.Get(m.Buf)
+								var mCuri, eCuri sipsp.PsipURI
+								err1, _ := sipsp.ParseURI(c, &mCuri)
+								err2, _ := sipsp.ParseURI(savedC, &eCuri)
+								if (err1 == 0 && err2 == 0 &&
+									!sipsp.URICmpShort(&mCuri, c,
+										&eCuri, savedC,
+										sipsp.URICmpSkipPort)) ||
+									(err1 != err2) {
+									// update with diff contact
+									WARN("XXX: updating entry %p callid %q"+
+										" f: %q t: %q"+
+										" contact %q with diff contact %q\n",
+										e, e.Key.GetCallID(),
+										e.Key.GetFromTag(),
+										e.Key.GetToTag(), savedC,
+										mC.URI.Get(m.Buf))
+									regHash.cnts.grp.Inc(regHash.cnts.hUpdDiffC)
+								}
+							}
 							e.Info.OverwriteAttrField(AttrContact,
 								&mC.URI, m.Buf)
 						}
@@ -275,6 +298,24 @@ func updateStateReq(e *CallEntry, m *sipsp.PSIPMsg, dir int) (CallState, Timeout
 				newState = prevState // keep state
 				// update Contact...
 				if mC := m.PV.Contacts.GetContact(0); mC != nil {
+					if !e.Info.Attrs[AttrContact].Empty() {
+						savedC := e.Info.Attrs[AttrContact].Get(e.Info.buf)
+						c := mC.URI.Get(m.Buf)
+						var mCuri, eCuri sipsp.PsipURI
+						err1, _ := sipsp.ParseURI(c, &mCuri)
+						err2, _ := sipsp.ParseURI(savedC, &eCuri)
+						if (err1 == 0 && err2 == 0 &&
+							!sipsp.URICmpShort(&mCuri, c, &eCuri, savedC,
+								sipsp.URICmpSkipPort)) || (err1 != err2) {
+							// update with diff contact
+							WARN("XXX: no totag: updating entry %p "+
+								"callid %q f: %q t: %q"+
+								" contact %q with diff contact %q\n",
+								e, e.Key.GetCallID(), e.Key.GetFromTag(),
+								e.Key.GetToTag(), savedC, mC.URI.Get(m.Buf))
+							regHash.cnts.grp.Inc(regHash.cnts.hUpdDiffC2)
+						}
+					}
 					e.Info.OverwriteAttrField(AttrContact, &mC.URI, m.Buf)
 				}
 			} else {

@@ -480,6 +480,11 @@ type regStats struct {
 	hNewBRace      counters.Handle
 	hRegNoC        counters.Handle
 	hRegNoAOR      counters.Handle
+	hUpdDiffC      counters.Handle
+	hUpdDiffC2     counters.Handle
+	hEntDiffAOR    counters.Handle
+	hBndDiffC      counters.Handle
+	hBndDiffAOR    counters.Handle
 }
 
 // hash table for reg entries (aor uri indexed)
@@ -544,6 +549,16 @@ func (h *RegEntryHash) Init(size int) {
 			"reg event, but no contact in the call entry"},
 		{&h.cnts.hRegNoAOR, 0, nil, nil, "ev_no_aor",
 			"reg event, but no aor in the message"},
+		{&h.cnts.hUpdDiffC, 0, nil, nil, "upd_diff_contact",
+			"reg entry updated with different contact"},
+		{&h.cnts.hUpdDiffC2, 0, nil, nil, "upd_diff_contact2",
+			"reg entry updated with different contact, no to-tag match case"},
+		{&h.cnts.hEntDiffAOR, 0, nil, nil, "entry_diff_aor",
+			"entry matches reg with different aor"},
+		{&h.cnts.hBndDiffC, 0, nil, nil, "binding_diff_contact",
+			"reg matches entry with different contact then linked binding"},
+		{&h.cnts.hBndDiffAOR, 0, nil, nil, "binding_diff_aor",
+			"reg matches entry with different AOR then linked binding"},
 	}
 	entries := 20 // extra space to allow registering more counters
 	if entries < len(regsCntDefs) {
