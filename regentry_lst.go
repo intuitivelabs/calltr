@@ -154,7 +154,7 @@ func (r *RegEntry) aorMatchURI(uri *sipsp.PsipURI, buf []byte) bool {
 
 func (r *RegEntry) contactMatchURI(uri *sipsp.PsipURI, buf []byte,
 	flags sipsp.URICmpFlags) bool {
-	ret := sipsp.URICmpShort(&r.ContactURI, r.buf, uri, buf, flags)
+	ret := sipsp.URICmp(&r.ContactURI, r.buf, uri, buf, flags)
 	return ret
 }
 
@@ -183,12 +183,11 @@ func (r *RegEntry) SetAOR(aorURI *sipsp.PsipURI, buf []byte) bool {
 // Set Contact. Returns true on success, false on failure (not enough space).
 func (r *RegEntry) SetContact(cURI *sipsp.PsipURI, buf []byte) bool {
 	var ok bool
-	c := cURI.Short()
+	c := cURI.Long()
 	if r.Contact, ok = r.addPField(c, buf); !ok {
 		return false
 	}
 	r.ContactURI = *cURI
-	r.ContactURI.Truncate()
 	if !r.ContactURI.AdjustOffs(r.Contact) {
 		// undo changes
 		r.pos -= int(r.Contact.Len)

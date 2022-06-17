@@ -384,6 +384,24 @@ func (d *EventData) Fill(ev EventType, e *CallEntry) int {
 		if CallAttrIdx(i) == AttrReason {
 			continue // skip, Reason handled above
 		}
+		// AttrContact special case: short URI to event
+		if CallAttrIdx(i) == AttrContact {
+			var pCuri sipsp.PsipURI
+			c := e.Info.Attrs[i].Get(e.Info.buf)
+			if err, _ := sipsp.ParseURI(c, &pCuri); err == 0 {
+				sURI := pCuri.Short() // uri without params or headers
+				n = addPField(&sURI, c, &d.Attrs[i], &d.Buf, &d.Used, -1)
+				if n != int(e.Info.Attrs[i].Len) {
+					d.Truncated = true
+					break
+				}
+				d.Valid++
+				continue
+			}
+			// else parse contact uri in call entry failed =>
+			// fallback to copying the entire contact uri
+			// TODO: counter for contact uri parse error
+		}
 		n = addPField(&e.Info.Attrs[i], e.Info.buf,
 			&d.Attrs[i], &d.Buf, &d.Used, -1)
 		if n != int(e.Info.Attrs[i].Len) {

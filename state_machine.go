@@ -224,14 +224,9 @@ func updateStateReq(e *CallEntry, m *sipsp.PSIPMsg, dir int) (CallState, Timeout
 								savedC :=
 									e.Info.Attrs[AttrContact].Get(e.Info.buf)
 								c := mC.URI.Get(m.Buf)
-								var mCuri, eCuri sipsp.PsipURI
-								err1, _ := sipsp.ParseURI(c, &mCuri)
-								err2, _ := sipsp.ParseURI(savedC, &eCuri)
-								if (err1 == 0 && err2 == 0 &&
-									!sipsp.URICmpShort(&mCuri, c,
-										&eCuri, savedC,
-										sipsp.URICmpSkipPort)) ||
-									(err1 != err2) {
+								eq, err, un := sipsp.URIRawCmp(c, savedC,
+									sipsp.URICmpSkipPort)
+								if err == 0 && !eq {
 									// update with diff contact
 									WARN("XXX: updating entry %p callid %q"+
 										" f: %q t: %q"+
@@ -241,6 +236,17 @@ func updateStateReq(e *CallEntry, m *sipsp.PSIPMsg, dir int) (CallState, Timeout
 										e.Key.GetToTag(), savedC,
 										mC.URI.Get(m.Buf))
 									regHash.cnts.grp.Inc(regHash.cnts.hUpdDiffC)
+								} else if err != 0 {
+									WARN("XXX: parse uri failed for "+
+										" entry %p callid %q"+
+										" f: %q t: %q"+
+										" contact %q msg contact %q"+
+										" err %s (%d) for %d\n",
+										e, e.Key.GetCallID(),
+										e.Key.GetFromTag(),
+										e.Key.GetToTag(), savedC,
+										mC.URI.Get(m.Buf),
+										err, err, un)
 								}
 							}
 							e.Info.OverwriteAttrField(AttrContact,
@@ -301,12 +307,9 @@ func updateStateReq(e *CallEntry, m *sipsp.PSIPMsg, dir int) (CallState, Timeout
 					if !e.Info.Attrs[AttrContact].Empty() {
 						savedC := e.Info.Attrs[AttrContact].Get(e.Info.buf)
 						c := mC.URI.Get(m.Buf)
-						var mCuri, eCuri sipsp.PsipURI
-						err1, _ := sipsp.ParseURI(c, &mCuri)
-						err2, _ := sipsp.ParseURI(savedC, &eCuri)
-						if (err1 == 0 && err2 == 0 &&
-							!sipsp.URICmpShort(&mCuri, c, &eCuri, savedC,
-								sipsp.URICmpSkipPort)) || (err1 != err2) {
+						eq, err, un := sipsp.URIRawCmp(c, savedC,
+							sipsp.URICmpSkipPort)
+						if err == 0 && !eq {
 							// update with diff contact
 							WARN("XXX: no totag: updating entry %p "+
 								"callid %q f: %q t: %q"+
@@ -314,6 +317,17 @@ func updateStateReq(e *CallEntry, m *sipsp.PSIPMsg, dir int) (CallState, Timeout
 								e, e.Key.GetCallID(), e.Key.GetFromTag(),
 								e.Key.GetToTag(), savedC, mC.URI.Get(m.Buf))
 							regHash.cnts.grp.Inc(regHash.cnts.hUpdDiffC2)
+						} else if err != 0 {
+							WARN("XXX: parse uri failed for "+
+								" entry %p callid %q"+
+								" f: %q t: %q"+
+								" contact %q msg contact %q"+
+								" err %s (%d) for %d\n",
+								e, e.Key.GetCallID(),
+								e.Key.GetFromTag(),
+								e.Key.GetToTag(), savedC,
+								mC.URI.Get(m.Buf),
+								err, err, un)
 						}
 					}
 					e.Info.OverwriteAttrField(AttrContact, &mC.URI, m.Buf)
@@ -807,7 +821,7 @@ func msgMatchContact(m *sipsp.PSIPMsg, c []byte) (bool, bool, uint32) {
 		mCuri := mC.URI.Get(m.Buf)
 		err2, _ := sipsp.ParseURI(mCuri, &mPCuri)
 		if (err1 == 0 && err2 == 0 &&
-			sipsp.URICmpShort(&pCuri, c, &mPCuri, mCuri, sipsp.URICmpAll)) ||
+			sipsp.URICmp(&pCuri, c, &mPCuri, mCuri, sipsp.URICmpAll)) ||
 			// fallback to normal string compare if unparsable uris:
 			(err1 != 0 && err2 != 0 && bytescase.CmpEq(mCuri, c)) {
 			// match

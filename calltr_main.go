@@ -755,17 +755,14 @@ endLocked:
 				// e.regBinding is refCnted & read-only => safe to read directly (?)
 				bC := e.regBinding.Contact.Get(e.regBinding.buf)
 				bAOR := e.regBinding.AOR.Get(e.regBinding.buf)
-				var eCuri, bCuri, bAORuri sipsp.PsipURI
-				err3, _ := sipsp.ParseURI(c, &eCuri)
-				err4, _ := sipsp.ParseURI(bC, &bCuri)
+				var bAORuri sipsp.PsipURI
+				ceq, err3, _ := sipsp.URIRawCmp(bC, c, sipsp.URICmpSkipPort)
 				err5, _ := sipsp.ParseURI(bAOR, &bAORuri)
-				if (err3 == 0 && err4 == 0 &&
-					!sipsp.URICmpShort(&bCuri, bC, &eCuri, c,
-						sipsp.URICmpSkipPort)) || (err3 != err4) {
+				if (err3 == 0 && !ceq) || (err3 != 0) {
 					WARN("XXX: %s on entry %p callid %q f: %q t : %q"+
-						" c %q not matching binding c: %q\n",
+						" c %q not matching binding c: %q err: %d (%s)\n",
 						ev, e, e.Key.GetCallID(), e.Key.GetFromTag(),
-						e.Key.GetToTag(), c, bC)
+						e.Key.GetToTag(), c, bC, err3, err3)
 					regHash.cnts.grp.Inc(regHash.cnts.hBndDiffC)
 				}
 				// dbg test3: binding aor matches entry aor
