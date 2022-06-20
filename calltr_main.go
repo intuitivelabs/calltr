@@ -447,7 +447,33 @@ func forkCallEntry(e *CallEntry, m *sipsp.PSIPMsg, dir int, match CallMatchType,
 			// (can't be in an initial because in that case it won't have a
 			//  a totag and it would have been a full-match).
 			if newToTag.Len == 0 {
-				return e
+				// it won't work for REGISTER or REG re-freshes requests
+				// that have no to-tag => check for same Contact & AOR
+				if m.FL.Request() && m.Method() == sipsp.MRegister {
+					if e.Method == sipsp.MRegister {
+						mChdr := m.PV.Contacts.GetContact(0)
+						if mChdr == nil && e.Info.Attrs[AttrContact].Empty() {
+							// TODO: check for matching AOR?
+							return e
+						}
+						if mChdr != nil {
+							// TODO if  e.Info.Attrs[AttrContact].Empty() ?
+							mC := mChdr.URI.Get(m.Buf)
+							eC := e.Info.Attrs[AttrContact].Get(e.Info.buf)
+							eq, _, _ := sipsp.URIRawCmp(mC, eC,
+								sipsp.URICmpSkipPort)
+							if eq {
+								// TODO: check for matching AOR?
+								return e
+							}
+						}
+						// non matching contact => fallback to forking
+					}
+				} else {
+					// not REGISTER or not request
+					return e
+				}
+				/// fallback to forking
 			}
 		}
 	}
