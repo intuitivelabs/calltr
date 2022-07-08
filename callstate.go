@@ -395,7 +395,8 @@ const (
 	AttrToURI
 	AttrMethod
 	AttrRURI
-	AttrContact
+	AttrContact1 // uac contact
+	AttrContact2 // uas contact
 	AttrReason
 	AttrUA
 	AttrUAS
@@ -405,17 +406,18 @@ const (
 )
 
 var callAttrTStr = [...]string{
-	AttrFromURI: "sip.from",
-	AttrToURI:   "sip.to",
-	AttrMethod:  "sip.request.method", // initial message method as "string"
-	AttrRURI:    "uri.original",
-	AttrContact: "sip.contact",         // contact header contents
-	AttrReason:  "sip.sip_reason",      // winning reply reason
-	AttrUA:      "user_agent.original", // from-ua / uac
-	AttrUAS:     "uas.original",        // server/remote-side UA
-	AttrPAI1:    "sip.pai1",            // 1st P-Asserted-Identity value
-	AttrPAI2:    "sip.pai2",            // 2nd P-Asserted-Identity value
-	AttrLast:    "invalid",
+	AttrFromURI:  "sip.from",
+	AttrToURI:    "sip.to",
+	AttrMethod:   "sip.request.method", // initial message method as "string"
+	AttrRURI:     "uri.original",
+	AttrContact1: "sip.contact",         // contact uac header contents
+	AttrContact2: "sip.contact2",        // contact uas header contents
+	AttrReason:   "sip.sip_reason",      // winning reply reason
+	AttrUA:       "user_agent.original", // from-ua / uac
+	AttrUAS:      "uas.original",        // server/remote-side UA
+	AttrPAI1:     "sip.pai1",            // 1st P-Asserted-Identity value
+	AttrPAI2:     "sip.pai2",            // 2nd P-Asserted-Identity value
+	AttrLast:     "invalid",
 }
 
 func (a CallAttrIdx) String() string {
@@ -436,16 +438,17 @@ type AttrLenRange struct {
 }
 
 var AttrSpace = [AttrLast]AttrLenRange{
-	AttrFromURI: {0, MaxURISpace, DefaultURISpace},
-	AttrToURI:   {0, MaxURISpace, DefaultURISpace},
-	AttrMethod:  {0, MaxMethodSpace, DefaultMethodSpace},
-	AttrRURI:    {0, MaxURISpace, DefaultURISpace},
-	AttrContact: {0, MaxContactSpace, DefaultContactSpace},
-	AttrReason:  {MinReasonSpace, MaxReasonSpace, DefaultReasonSpace},
-	AttrUA:      {0, MaxUASpace, DefaultUACSpace},
-	AttrUAS:     {0, MaxUASpace, DefaultUASSpace},
-	AttrPAI1:    {0, MaxPAI1Space, DefaultPAI1Space},
-	AttrPAI2:    {0, MaxPAI2Space, DefaultPAI2Space},
+	AttrFromURI:  {0, MaxURISpace, DefaultURISpace},
+	AttrToURI:    {0, MaxURISpace, DefaultURISpace},
+	AttrMethod:   {0, MaxMethodSpace, DefaultMethodSpace},
+	AttrRURI:     {0, MaxURISpace, DefaultURISpace},
+	AttrContact1: {0, MaxContactSpace, DefaultContactSpace},
+	AttrContact2: {0, MaxContactSpace, DefaultContactSpace},
+	AttrReason:   {MinReasonSpace, MaxReasonSpace, DefaultReasonSpace},
+	AttrUA:       {0, MaxUASpace, DefaultUACSpace},
+	AttrUAS:      {0, MaxUASpace, DefaultUASSpace},
+	AttrPAI1:     {0, MaxPAI1Space, DefaultPAI1Space},
+	AttrPAI2:     {0, MaxPAI2Space, DefaultPAI2Space},
 }
 
 // CallInfo contains extra call information for event generation.
@@ -561,23 +564,27 @@ func (ci *CallInfo) AddMethod(v *sipsp.PField, buf []byte) bool {
 }
 
 // helper function: fills src array with corresp. values from the sip msg.
+// dir is who initiated the current transaction (sent the  request):
+//    0 UAC -> UAS, 1  UAS -> UAC.(note a request and its reply will
+//    always have the same dir!)
 func FillAttrsSrc(m *sipsp.PSIPMsg, dir int, src *[AttrLast]*sipsp.PField) {
 	// P-Asserted-Identity: taken only from requests from UAC->UAS
 	src[AttrPAI1] = nil
 	src[AttrPAI2] = nil
+	// get 1st contact uri
+	var cURI *sipsp.PField
+	cv := m.PV.Contacts.GetContact(0)
+	if cv != nil {
+		cURI = &cv.URI
+	} // else cURI = nil
 	if m.Request() {
-		if dir == 0 {
+		if dir == 0 { // transaction initiated by UAC (initial req)
 			src[AttrFromURI] = &m.PV.From.URI
 			src[AttrToURI] = &m.PV.To.URI
 			src[AttrMethod] = &m.FL.Method
 			src[AttrRURI] = &m.FL.URI
-			// get 1st contact uri
-			cv := m.PV.Contacts.GetContact(0)
-			if cv != nil {
-				src[AttrContact] = &cv.URI
-			} else {
-				src[AttrContact] = nil
-			}
+			src[AttrContact1] = cURI
+			src[AttrContact2] = nil
 			src[AttrReason] = nil
 			src[AttrUA] = &m.HL.GetHdr(sipsp.HdrUA).Val
 			src[AttrUAS] = nil
@@ -591,50 +598,35 @@ func FillAttrsSrc(m *sipsp.PSIPMsg, dir int, src *[AttrLast]*sipsp.PField) {
 				// take only the uri
 				src[AttrPAI2] = &pai2.URI
 			}
-		} else {
+		} else { // dir == 1, transaction initiated by UAS
 			src[AttrFromURI] = &m.PV.To.URI
 			src[AttrToURI] = &m.PV.From.URI
 			src[AttrMethod] = nil
 			src[AttrRURI] = nil
-			src[AttrContact] = nil
+			src[AttrContact1] = nil
+			src[AttrContact2] = cURI
 			src[AttrReason] = nil
 			src[AttrUA] = nil
 			src[AttrUAS] = &m.HL.GetHdr(sipsp.HdrUA).Val
 		}
-	} else {
-		if dir == 0 {
+	} else { // reply:
+		if dir == 0 { // transaction initiated by UAC
 			src[AttrFromURI] = &m.PV.From.URI
 			src[AttrToURI] = &m.PV.To.URI
 			src[AttrMethod] = &m.PV.CSeq.Method
 			src[AttrRURI] = nil
-			if m.Method() == sipsp.MRegister && m.FL.Status >= 200 {
-				cv := m.PV.Contacts.GetContact(0)
-				if cv != nil {
-					src[AttrContact] = &cv.URI
-				} else {
-					src[AttrContact] = nil
-				}
-			} else {
-				src[AttrContact] = nil
-			}
+			src[AttrContact1] = nil
+			src[AttrContact2] = cURI // the reply contains the UAS contact
 			src[AttrReason] = &m.FL.Reason
 			src[AttrUA] = nil
 			src[AttrUAS] = &m.HL.GetHdr(sipsp.HdrUA).Val
-		} else {
+		} else { // dir == 1, transaction initiated by UAS
 			src[AttrFromURI] = &m.PV.To.URI
 			src[AttrToURI] = &m.PV.From.URI
 			src[AttrMethod] = nil
 			src[AttrRURI] = nil
-			if m.Method() != sipsp.MRegister {
-				cv := m.PV.Contacts.GetContact(0)
-				if cv != nil {
-					src[AttrContact] = &cv.URI
-				} else {
-					src[AttrContact] = nil
-				}
-			} else {
-				src[AttrContact] = nil
-			}
+			src[AttrContact1] = cURI // the reply contains the UAC contact
+			src[AttrContact2] = nil
 			src[AttrReason] = nil
 			src[AttrUA] = &m.HL.GetHdr(sipsp.HdrUA).Val
 			src[AttrUAS] = nil
@@ -836,7 +828,7 @@ type MsgBackTrace struct {
 //AddReq adds a request to the message trace.
 // The parameteres are:
 //    method - the sip request method
-//    dir    - the request direction (UAC -> UAS or UAS -> UAC)
+//    dir    - the request direction ( 0: UAC -> UAS or 1: UAS -> UAC)
 //    isRetr - true if it's a retransmission of some previous request
 //    msgCnt - number of identical messages to add (at least 1)
 func (m *MsgBackTrace) AddReq(method sipsp.SIPMethod, dir int,

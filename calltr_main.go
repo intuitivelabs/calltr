@@ -432,7 +432,7 @@ func forkCallEntry(e *CallEntry, m *sipsp.PSIPMsg, dir int, match CallMatchType,
 			//  4. new message matching old early dialog for which we missed
 			//     the final reply
 			// In all the cases it makes sense to "absorb" the message and
-			// not "fork" the call entry fo it.
+			// not "fork" the call entry for it.
 			// If it is a retr. update_state will handle it accordingly.
 			// In the 3rd case, we might have not seen
 			// any reply (re-constructed from an ACK), but even in this
@@ -449,17 +449,18 @@ func forkCallEntry(e *CallEntry, m *sipsp.PSIPMsg, dir int, match CallMatchType,
 			if newToTag.Len == 0 {
 				// it won't work for REGISTER or REG re-freshes requests
 				// that have no to-tag => check for same Contact & AOR
-				if m.FL.Request() && m.Method() == sipsp.MRegister {
+				if m.FL.Request() && m.Method() == sipsp.MRegister &&
+					dir == 0 {
 					if e.Method == sipsp.MRegister {
 						mChdr := m.PV.Contacts.GetContact(0)
-						if mChdr == nil && e.Info.Attrs[AttrContact].Empty() {
+						if mChdr == nil && e.Info.Attrs[AttrContact1].Empty() {
 							// TODO: check for matching AOR?
 							return e
 						}
 						if mChdr != nil {
-							// TODO if  e.Info.Attrs[AttrContact].Empty() ?
+							// TODO if  e.Info.Attrs[AttrContact1].Empty() ?
 							mC := mChdr.URI.Get(m.Buf)
-							eC := e.Info.Attrs[AttrContact].Get(e.Info.buf)
+							eC := e.Info.Attrs[AttrContact1].Get(e.Info.buf)
 							eq, _, _ := sipsp.URIRawCmp(mC, eC,
 								sipsp.URICmpSkipPort)
 							if eq {
@@ -655,14 +656,22 @@ func ProcessMsg(m *sipsp.PSIPMsg, ni [2]NetInfo, f HandleEvF, evd *EventData,
 	case CallNoMatch:
 		if flags&CallStProcessNew != 0 {
 			// create new call state
+			// mhastotag := !m.PV.To.Tag.Empty()
 			if !m.FL.Request() {
 				//  if entry is created from a reply, invert ip addresses
 				var endpoints [2]NetInfo
 				endpoints[0], endpoints[1] = ni[1], ni[0]
 				ni = endpoints
 				e = newCallEntry(hashNo, 0, m, ni, 0, f)
+				// if created from a reply => much higher chance that we
+				// see a reply from the UAS to a UAC req (100% for non-INV)
+				dir = 0 // transaction initiated by UAC
 			} else {
 				e = newCallEntry(hashNo, 0, m, ni, 0, f)
+				// for a request the chance is higher that it comes from
+				// the UAC (100% for non-INV or for INV with no totag, no
+				// way to tell for INV with to-tag)
+				dir = 0 // transaction initiated by UAC
 			}
 			if e == nil {
 				if DBGon() {
@@ -710,15 +719,21 @@ func ProcessMsg(m *sipsp.PSIPMsg, ni [2]NetInfo, f HandleEvF, evd *EventData,
 			case n == e:
 				// in-place update
 				e.Ref() // we return it
-				// since e is re-used -> reset not needed inherited
-				// call Flags and EvFlags
-				e.Flags &= ^CFRegMaskF // reset REGISTER related flags
-				// keep ev flags, don't want to regen. seen EVs in forked calls
-				// except for REGISTER (hack) - since register EVs are now
-				// handled by the register binding cache, we don't inherit
-				// them in forked or re-used REGISTER entries (which are
-				// caused by REGISTERs with different from or to-tag)
-				e.EvFlags &= ^EvRegMaskF
+				// for REGISTER we need to distinguish between
+				// tmp. return (e.g. new REGISTER partial matching old entry)
+				// or final ownership taking (after REGISTER reply)
+				if !m.FL.Request() {
+					// since e is re-used -> reset not needed inherited
+					// call Flags and EvFlags
+					e.Flags &= ^CFRegMaskF // reset REGISTER related flags
+					// keep ev flags, don't want to regen. seen EVs in
+					// forked calls
+					// except for REGISTER (hack) - since register EVs are now
+					// handled by the register binding cache, we don't inherit
+					// them in forked or re-used REGISTER entries (which are
+					// caused by REGISTERs with different from or to-tag)
+					e.EvFlags &= ^EvRegMaskF
+				}
 				_, to, toF, ev = updateState(e, m, dir)
 				csTimerUpdateTimeoutUnsafe(e,
 					time.Duration(to)*time.Second, toF)
@@ -755,7 +770,9 @@ endLocked:
 	// update regCache
 	if ev == EvRegNew || ev == EvRegDel || ev == EvRegExpired {
 		a := m.PV.GetTo().URI.Get(m.Buf) // byte slice w/ To uri
-		c := e.Info.Attrs[AttrContact].Get(e.Info.buf)
+		// use the contact from the REGISTER request (AttrContact1) and not
+		// the contact from the reply (AttrContact2 or 1st contact in m)
+		c := e.Info.Attrs[AttrContact1].Get(e.Info.buf)
 		aor := make([]byte, len(a))
 		contact := make([]byte, len(c))
 		copy(aor, a)
@@ -826,7 +843,7 @@ endLocked:
 				ev = EvNone
 			}
 			// TODO: force ev = EvNove ?
-			// Case 1: no contact in callstate (orig req?)
+			// Case 1: no contact1 in callstate (orig req?)
 			//         here either no contact in orig request (reg-fetch?) or
 			//         only reply seen
 			//         (since we set Reg* event type only on reply)
@@ -836,6 +853,10 @@ endLocked:
 			//         (TODO check if EvRegDel can be generated w/o a contact
 			//          in req or on reply out-of-the-blue -> check
 			//          handleRegRepl()).
+			//         TODO: investigate handling reg-fetch here
+			//             (ev -> EvNone and silent update reg cache if
+			//              no entry for the contact exists -- to handle
+			//              restarts)
 			// Case 2: no to/aor in reply => broken
 		}
 	}
@@ -885,6 +906,8 @@ func Track(m *sipsp.PSIPMsg, n [2]NetInfo, f HandleEvF) bool {
 // updateRegCache creates/deletes RegCache binding entries in function of
 // the event and CallEntry. It returns true for success, false for error and
 // an updated EventType.
+//  c is the contact from the REGISTER request (and not the reply), thus
+//  an empty c means a REG fetch, and a  "*" c is valid (delete all).
 // WARNING: safe version, it must be called with the corresp. CallEntry hash
 // bucket UNlocked and with a reference held to e.
 func updateRegCache(event EventType, e *CallEntry, aor []byte, c []byte) (bool, EventType) {

@@ -218,11 +218,14 @@ func updateStateReq(e *CallEntry, m *sipsp.PSIPMsg, dir int) (CallState, Timeout
 				// and for other messages in the same "dialog" (e.g. OPTIONs)
 				if mmethod == sipsp.MRegister || e.Method == sipsp.MRegister {
 					// update Contact...
-					if mmethod == sipsp.MRegister {
+					if mmethod == sipsp.MRegister && dir == 0 {
+						// overwrite entry contact only if REGISTER if not
+						// a fetch (no-contact)
 						if mC := m.PV.Contacts.GetContact(0); mC != nil {
-							if !e.Info.Attrs[AttrContact].Empty() {
+							// extra dbg checks
+							if !e.Info.Attrs[AttrContact1].Empty() {
 								savedC :=
-									e.Info.Attrs[AttrContact].Get(e.Info.buf)
+									e.Info.Attrs[AttrContact1].Get(e.Info.buf)
 								c := mC.URI.Get(m.Buf)
 								eq, err, un := sipsp.URIRawCmp(c, savedC,
 									sipsp.URICmpSkipPort)
@@ -249,7 +252,7 @@ func updateStateReq(e *CallEntry, m *sipsp.PSIPMsg, dir int) (CallState, Timeout
 										err, err, un)
 								}
 							}
-							e.Info.OverwriteAttrField(AttrContact,
+							e.Info.OverwriteAttrField(AttrContact1,
 								&mC.URI, m.Buf)
 						}
 					}
@@ -296,16 +299,16 @@ func updateStateReq(e *CallEntry, m *sipsp.PSIPMsg, dir int) (CallState, Timeout
 			// REGISTER refresh hack: update timeout only if bigger
 			// then current (to allow keeping long-term REGISTER
 			// entry that will catch refreshes)
-			if prevState != CallStInit {
+			if prevState != CallStInit && dir == 0 {
 				toFlags = FTimerUpdGT
 				// keep state, a REG refresh should not change it
 				// (otherwise due to the match REGs w/o to-tags hack a
 				// REG-refresh  might get here and reset the state)
 				newState = prevState // keep state
-				// update Contact...
+				// update Contact, but only if it's not a fetch (no contact)
 				if mC := m.PV.Contacts.GetContact(0); mC != nil {
-					if !e.Info.Attrs[AttrContact].Empty() {
-						savedC := e.Info.Attrs[AttrContact].Get(e.Info.buf)
+					if !e.Info.Attrs[AttrContact1].Empty() {
+						savedC := e.Info.Attrs[AttrContact1].Get(e.Info.buf)
 						c := mC.URI.Get(m.Buf)
 						eq, err, un := sipsp.URIRawCmp(c, savedC,
 							sipsp.URICmpSkipPort)
@@ -330,7 +333,7 @@ func updateStateReq(e *CallEntry, m *sipsp.PSIPMsg, dir int) (CallState, Timeout
 								err, err, un)
 						}
 					}
-					e.Info.OverwriteAttrField(AttrContact, &mC.URI, m.Buf)
+					e.Info.OverwriteAttrField(AttrContact1, &mC.URI, m.Buf)
 				}
 			} else {
 				newState = CallStFNonInv
@@ -643,11 +646,12 @@ func updateStateRepl(e *CallEntry, m *sipsp.PSIPMsg, dir int) (CallState, Timeou
 	e.prevState.Add(e.State)
 	chgState(e, newState, dir)
 	// add extra event attributes from msg that are not already set
-	// Note: a reply to a reg fetch will should not cause the contact of
+	// Note: a reply to a reg fetch should not cause the contact of
 	//        the entry to be filled with the 1st contact.
 	// Note2: in general disallow missing contacts to be filled from
 	//        replies.
-	e.Info.AddFromMsg(m, dir, AttrContact.Flag())
+	// TODO: obosolete? AttrContact1 should now be nill for repl && dir == 0
+	e.Info.AddFromMsg(m, dir, AttrContact1.Flag())
 	// TODO: it would be cleaner to move updateEvent() just before event
 	//       generation (end of ProcessMsg() and on finalTimeoutEv()).
 	//       (this would avoid marking an event as being generated via
@@ -867,7 +871,8 @@ func handleRegRepl(e *CallEntry, m *sipsp.PSIPMsg) (event EventType, to TimeoutS
 	event = EvRegNew
 	// TODO: if not all Contacts parsed, parse manually
 	//       REGISTER contacts
-	savedC := e.Info.Attrs[AttrContact].Get(e.Info.buf)
+	// use UAC (REGISTER) contact
+	savedC := e.Info.Attrs[AttrContact1].Get(e.Info.buf)
 	if len(savedC) == 0 {
 		// no contact in the request
 		// it's either a "ping" REGISTER or the call-entry

@@ -385,7 +385,7 @@ func (d *EventData) Fill(ev EventType, e *CallEntry) int {
 			continue // skip, Reason handled above
 		}
 		// AttrContact special case: short URI to event
-		if CallAttrIdx(i) == AttrContact {
+		if CallAttrIdx(i) == AttrContact1 || CallAttrIdx(i) == AttrContact2 {
 			var pCuri sipsp.PsipURI
 			c := e.Info.Attrs[i].Get(e.Info.buf)
 			if err, _ := sipsp.ParseURI(c, &pCuri); err == 0 {
