@@ -1207,6 +1207,9 @@ func regDelDelay(e *CallEntry,
 	delayed := 0
 	deleted := 0
 	matching := 0
+	// if better entry then current is found for setting CFRegDelDelayed
+	// the next flag will be set to true
+	betterMatch := false
 	// if a RegEntry is attached to the current CallEntry mark it for
 	// delayed delete
 	cstHash.HTable[e.hashNo].Lock()
@@ -1270,6 +1273,63 @@ retry:
 			regHash.cnts.grp.Inc(regHash.cnts.hDelNoCached)
 			if noBinding {
 				regHash.cnts.grp.Inc(regHash.cnts.hDelNoMatch)
+
+				// alloc and fill new reg entry cache for "this" CallEntry
+				// even if this is a delayed delete (to catch possible
+				// reg-new after initial reg-del).
+				nRegE := newRegEntry(&aorURI, aor, &cURI, c)
+				if nRegE != nil {
+					nRegE.Ref()
+					cstHash.HTable[e.hashNo].Lock()
+					e.Ref()
+					nRegE.ce = e
+					e.regBinding = nRegE
+					nRegE.hashNo = h
+					// check if the reg cache has not been update in the
+					// meantime
+					regHash.HTable[h].Lock()
+					rb := regHash.HTable[h].FindBindingUnsafe(&aorURI, aor,
+						&cURI, c)
+					if rb != nil {
+						// updated in the meantime => race => back off
+						e.regBinding = nil
+						nRegE.ce = nil
+						e.Unref()
+						nRegE.Unref()
+						nRegE.hashNo = 0
+
+						// consider the found entry to be the newest =>
+						// ignore delayed del for the current entry
+						e.Flags &= ^CFRegDelDelayed
+						e.EvFlags.Set(EvRegDel)
+						e.lastEv = EvRegDel
+					} else {
+						// add cached entry
+						maxRegEntries := GetCfg().Mem.MaxRegEntries
+						if regHash.entries.Inc(1) > maxRegEntries &&
+							maxRegEntries > 0 {
+							// past the hash limit
+							nRegE.ce.regBinding = nil
+							nRegE.ce.Unref() // not linked anymore from nRegE
+							nRegE.ce = nil
+							nRegE.Unref() // will auto-free on 0 refcnt
+							nRegE = nil
+							//event = EvNone
+							regHash.entries.Dec(1)
+							regHash.cnts.grp.Inc(regHash.cnts.hFailLimEx)
+						} else {
+							// add the new reg entry to the hash
+							regHash.HTable[h].Insert(nRegE)
+							regHash.HTable[h].IncStats()
+							regHash.cnts.grp.Inc(regHash.cnts.hActive)
+							nRegE.Ref()
+						}
+					}
+					regHash.HTable[h].Unlock()
+					cstHash.HTable[e.hashNo].Unlock()
+				} else {
+					regHash.cnts.grp.Inc(regHash.cnts.hFailNew)
+				}
 			}
 		}
 		goto end // nothing found
@@ -1306,10 +1366,18 @@ retry:
 						ce.Flags&CFRegDelDelayed != 0 {
 						regHash.cnts.grp.Inc(regHash.cnts.hDelMDelayedC)
 					}
-					ce.Flags &= ^CFRegDelDelayed
-					ce.EvFlags.Set(EvRegDel)
-					ce.EvFlags.Clear(EvRegNew) // dbg: rst a possible RegNew
-					ce.lastEv = EvRegDel
+					if !betterMatch && !ce.EvFlags.Test(EvRegDel) {
+						ce.Flags |= CFRegDelDelayed // mark it
+						// dbg: rst a possible RegNew
+						ce.EvFlags.Clear(EvRegNew)
+						delayed++
+						betterMatch = true
+					} else {
+						ce.Flags &= ^CFRegDelDelayed
+						ce.EvFlags.Set(EvRegDel)
+						ce.EvFlags.Clear(EvRegNew) // dbg: rst a possible RegNew
+						ce.lastEv = EvRegDel
+					}
 				}
 				if !cstHash.HTable[ce.hashNo].Detached(ce) {
 					//  force delayed delete timeout
@@ -1323,6 +1391,19 @@ retry:
 			cstHash.HTable[ce.hashNo].Unlock()
 			ce.Unref() // relinquish our temporary ref from above
 		}
+	}
+	if betterMatch {
+		// undo reg-del-delayed for e
+		cstHash.HTable[e.hashNo].Lock()
+		{
+			e.Flags &= ^CFRegDelDelayed
+			e.EvFlags.Set(EvRegDel)
+			e.lastEv = EvRegDel
+			if !matchAll {
+				delayed-- // e is not delay deleted anymore
+			}
+		}
+		cstHash.HTable[e.hashNo].Unlock()
 	}
 end:
 	if matchAll {
