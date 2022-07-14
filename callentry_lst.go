@@ -209,14 +209,16 @@ func (lst *CallEntryLst) Find(callid, ftag, ttag []byte, cseq uint32,
 		mt, dir := e.match(callid, ftag, ttag)
 		switch mt {
 		case CallFullMatch:
-			//  don't FullMatch if no to-tag is present, at least
-			//        not if Methods are !=
+			//  don't FullMatch if no to-tag is present (on both sides),
+			// at least not if Methods are !=
+			// (if methods are the same and no to-tag present in both sides
+			// return CallFullMatch)
 			if len(ttag) != 0 || method == e.Method {
 				return e, mt, dir
 			}
 			// else:
 			mt = CallPartialMatch
-			// TODO: partialMDir = dir
+			partialMDir = dir
 			fallthrough
 		case CallPartialMatch:
 			partialMatch, partialMDir = chooseCallIDMatch(
@@ -427,17 +429,37 @@ func chooseCallIDMatch(e1 *CallEntry, dir1 int, e2 *CallEntry, dir2 int,
 	// (when changing the from tag the CSeq numbering is most likely
 	//  restarted), but it still probable enough that using CSeq will
 	// get them most recent entry
-	if cseq == e1.CSeq[dir1] && cseq != e2.CSeq[dir2] {
+
+	// Compute cseq distance
+
+	var dcseq1, dcseq2 uint32
+	if cseq >= e1.CSeq[dir1] {
+		dcseq1 = cseq - e1.CSeq[dir1]
+	} else {
+		dcseq1 = e1.CSeq[dir1] - cseq
+	}
+	if cseq >= e2.CSeq[dir2] {
+		dcseq2 = cseq - e2.CSeq[dir2]
+	} else {
+		dcseq2 = e2.CSeq[dir2] - cseq
+	}
+
+	if dcseq1 == 0 && dcseq2 != 0 {
 		return e1, dir1
 	}
-	if cseq != e1.CSeq[dir1] && cseq == e2.CSeq[dir2] {
+	if dcseq1 != 0 && dcseq2 == 0 {
 		return e2, dir2
 	}
 
-	if (cseq == e1.CSeq[dir1] && cseq == e2.CSeq[dir2]) ||
-		(cseq > e1.CSeq[dir1] && cseq > e2.CSeq[dir2]) {
-		// equal cseqs or current msg cseq > both entries cseq
-		// (e.g. in the case of REGISTER with changing from-tags )
+	if (cseq >= e1.CSeq[dir1]) && (cseq < e2.CSeq[dir2]) {
+		return e1, dir1
+	}
+	if (cseq < e1.CSeq[dir1]) && (cseq >= e2.CSeq[dir2]) {
+		return e2, dir2
+	}
+
+	if e1.CSeq[dir1] == e2.CSeq[dir2] {
+		// equal cseqs, pick the one with the auth failure
 		if authFailure(e1.ReplStatus[dir1]) && !authFailure(e2.ReplStatus[dir2]) {
 			// e1 has a failed auth. => return it
 			return e1, dir1
@@ -446,24 +468,13 @@ func chooseCallIDMatch(e1 *CallEntry, dir1 int, e2 *CallEntry, dir2 int,
 			// e2 has a failed auth. => return it
 			return e2, dir2
 		}
-		if authFailure(e1.ReplStatus[dir1]) && authFailure(e2.ReplStatus[dir2]) {
-			//  both have auth failure => fall back to using CSeq
-			// (arbitrarily pick the entry with the greater CSeq, probably
-			//  more recent)
-			if e1.CSeq[dir1] > e2.CSeq[dir2] {
-				return e1, dir1
-			}
-			return e2, dir2
-		}
-		// either both have auth failure or none => fallback to
-		// using CSeq
-		if e1.CSeq[dir1] > e2.CSeq[dir2] {
-			return e1, dir1
-		}
-		return e2, dir2
+		// either both have auth failure or none, cseqs are the same =>
+		// fallback to using the first one...
+		return e1, dir1
 	}
-	// here cseq is less then both or only one of them, return the greater one
-	if e1.CSeq[dir1] > e2.CSeq[dir2] {
+	// here cseq is less then both or greater then both
+	// => choose based on distance
+	if dcseq1 <= dcseq2 {
 		return e1, dir1
 	}
 	return e2, dir2
