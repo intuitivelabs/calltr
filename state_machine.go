@@ -877,8 +877,8 @@ func handleRegRepl(e *CallEntry, m *sipsp.PSIPMsg) (event EventType, to TimeoutS
 		// no contact in the request
 		// it's either a "ping" REGISTER or the call-entry
 		// was created from a REG reply w/ no contact (?)
-		// in either case we generate no event
-		event = EvNone
+		// in either case we generate EvRegFetch (internal use)
+		event = EvRegFetch
 		to = 0                // let caller decide on the default timeout
 		toFlags = FTimerUpdGT // allow only extending the timeout
 		/*

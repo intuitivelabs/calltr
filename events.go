@@ -27,6 +27,7 @@ const (
 	EvRegNew
 	EvRegDel
 	EvRegExpired
+	EvRegFetch // register-fetch ( register w/ no contacts), internal use only
 	EvSubNew
 	EvSubDel
 	EvOtherFailed  // other case, not covered above, with neg. reply
@@ -47,6 +48,7 @@ var evTypeName = [EvBad + 1]string{
 	EvRegNew:       "reg-new",
 	EvRegDel:       "reg-del",
 	EvRegExpired:   "reg-expired",
+	EvRegFetch:     "reg-fetch",
 	EvSubNew:       "sub-new",
 	EvSubDel:       "sub-del",
 	EvOtherFailed:  "other-failed",
@@ -64,7 +66,7 @@ func (e EventType) String() string {
 	return evTypeName[int(e)]
 }
 
-type EventFlags uint16
+type EventFlags uint32
 
 const (
 	EvNoneF         EventFlags = iota
@@ -76,6 +78,7 @@ const (
 	EvRegNewF       EventFlags = (EventFlags)(1) << EvRegNew
 	EvRegDelF       EventFlags = (EventFlags)(1) << EvRegDel
 	EvRegExpiredF   EventFlags = (EventFlags)(1) << EvRegExpired
+	EvRegFetchF     EventFlags = (EventFlags)(1) << EvRegFetch
 	EvSubNewF       EventFlags = (EventFlags)(1) << EvSubNew
 	EvSubDelF       EventFlags = (EventFlags)(1) << EvSubDel
 	EvOtherFailedF  EventFlags = (EventFlags)(1) << EvOtherFailed

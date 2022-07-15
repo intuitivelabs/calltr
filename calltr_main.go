@@ -768,16 +768,35 @@ func ProcessMsg(m *sipsp.PSIPMsg, ni [2]NetInfo, f HandleEvF, evd *EventData,
 	}
 endLocked:
 	// update regCache
-	if ev == EvRegNew || ev == EvRegDel || ev == EvRegExpired {
-		a := m.PV.GetTo().URI.Get(m.Buf) // byte slice w/ To uri
+	if ev == EvRegNew || ev == EvRegDel || ev == EvRegExpired ||
+		ev == EvRegFetch {
+		aor := m.PV.GetTo().URI.Get(m.Buf) // byte slice w/ To uri
 		// use the contact from the REGISTER request (AttrContact1) and not
 		// the contact from the reply (AttrContact2 or 1st contact in m)
 		c := e.Info.Attrs[AttrContact1].Get(e.Info.buf)
-		aor := make([]byte, len(a))
+		// copy contact so that it would be valid after  e is unlocked
 		contact := make([]byte, len(c))
-		copy(aor, a)
 		copy(contact, c)
-		if len(aor) != 0 && len(contact) != 0 {
+		// empty contact valid for a RegDel: e.g. seen only the
+		// reply or a reg ping with no contacts
+		if len(contact) == 0 {
+			// Case 1: no contact1 in callstate (orig req?)
+			//         here either no contact in orig request (reg-fetch?) or
+			//         only reply seen
+			//         (since we set Reg* event type only on reply)
+			//         We catch reg-fetch before (when updating stats on
+			//         reg reply) => we should not get a RegNew here and
+			//         not an EvRegExpired => we could get only EvRegDel or
+			//         EvRegFetch
+			//         (TODO check if EvRegDel can be generated w/o a contact
+			//          in req or on reply out-of-the-blue -> check
+			//          handleRegRepl()).
+			if ev == EvRegNew { // reg-fetch - ignored
+				ev = EvRegFetch // should be already handled in updateState()
+			}
+			regHash.cnts.grp.Inc(regHash.cnts.hRegNoC)
+		}
+		if len(aor) != 0 {
 			// FIXME: dbg tests: msg contact matches saved contact
 			savedAOR := e.Info.Attrs[AttrToURI].Get(e.Info.buf)
 			var mAORuri, savedAORuri sipsp.PsipURI
@@ -799,6 +818,7 @@ endLocked:
 				bC := e.regBinding.Contact.Get(e.regBinding.buf)
 				bAOR := e.regBinding.AOR.Get(e.regBinding.buf)
 				var bAORuri sipsp.PsipURI
+				// TODO: handle '*' contact
 				ceq, err3, _ := sipsp.URIRawCmp(bC, c, sipsp.URICmpSkipPort)
 				err5, _ := sipsp.ParseURI(bAOR, &bAORuri)
 				if (err3 == 0 && !ceq) || (err3 != 0) {
@@ -820,44 +840,52 @@ endLocked:
 				}
 			}
 			cstHash.HTable[hashNo].Unlock()
-			_, ev = updateRegCache(ev, e, aor, contact)
+			if len(contact) != 0 {
+				_, ev = updateRegCache(ev, e, aor, contact)
+			} else {
+				if ev != EvRegFetch && ev != EvRegNew {
+					BUG("no contacts and no reg-fetch or reg-new: %q\n",
+						ev.String())
+				}
+				// if contact is empty (reg-fetch or missing original request),
+				// use  instead all of the 1st contact in the reply
+				// (the current version supports only one regentry per
+				//  call-entry so we cannot add all the contacts)
+				if !m.FL.Request() {
+					mC := m.PV.Contacts.GetContact(0)
+					if mC != nil {
+						mCuri := mC.URI.Get(m.Buf)
+						_, ev = updateRegCache(ev, e, aor, mCuri)
+					}
+					/* future version (w/ reg-cache decoupled from
+						   call-entries):
+					for n := 0; n < m.PV.Contacts.N; n++ {
+						mC := m.PV.Contacts.GetContact(n)
+						if mC == nil {
+							continue
+						}
+						mCuri := mC.URI.Get(m.Buf)
+						_, ev = updateRegCache(ev, e, aor, mCuri)
+					}
+					*/
+				} else {
+					BUG("updateRegCache attempt on request instead of reply\n")
+					ev = EvNone
+				}
+			}
 			cstHash.HTable[hashNo].Lock()
-		} else {
-			// empty contact valid for a RegDel: e.g. seen only the
-			// reply or a reg ping with no contacts
-			if len(contact) == 0 {
-				regHash.cnts.grp.Inc(regHash.cnts.hRegNoC)
-			}
-			if len(aor) == 0 {
-				regHash.cnts.grp.Inc(regHash.cnts.hRegNoAOR)
-			}
-			if true /*ev != EvRegDel*/ {
-				BUG("calltr.ProcessMsg: empty aor (%q) or contact(%q) for %p:"+
-					" ev %d (%q last %q prev) state %q (%q) prev msgs %q "+
-					"cid %q msg:\n%q\n",
-					aor, contact, e, int(ev), ev.String(),
-					e.lastEv.String(),
-					e.State.String(), e.prevState.String(),
-					e.lastMsgs.String(),
-					e.Key.GetCallID(), m.Buf)
-				ev = EvNone
-			}
-			// TODO: force ev = EvNove ?
-			// Case 1: no contact1 in callstate (orig req?)
-			//         here either no contact in orig request (reg-fetch?) or
-			//         only reply seen
-			//         (since we set Reg* event type only on reply)
-			//         We catch reg-fetch before (when updating stats on
-			//         reg reply) => we should not get a RegNew here and
-			//         not an EvRegExpired => we could get only EvRegDel
-			//         (TODO check if EvRegDel can be generated w/o a contact
-			//          in req or on reply out-of-the-blue -> check
-			//          handleRegRepl()).
-			//         TODO: investigate handling reg-fetch here
-			//             (ev -> EvNone and silent update reg cache if
-			//              no entry for the contact exists -- to handle
-			//              restarts)
+		} else { // empty aor
 			// Case 2: no to/aor in reply => broken
+			regHash.cnts.grp.Inc(regHash.cnts.hRegNoAOR)
+			BUG("calltr.ProcessMsg: empty aor (%q) or contact(%q) for %p:"+
+				" ev %d (%q last %q prev) state %q (%q) prev msgs %q "+
+				"cid %q msg:\n%q\n",
+				aor, contact, e, int(ev), ev.String(),
+				e.lastEv.String(),
+				e.State.String(), e.prevState.String(),
+				e.lastMsgs.String(),
+				e.Key.GetCallID(), m.Buf)
+			ev = EvNone // something is very wrong, no event
 		}
 	}
 	if ev != EvNone && evd != nil {
@@ -924,7 +952,7 @@ func updateRegCache(event EventType, e *CallEntry, aor []byte, c []byte) (bool, 
 		} else {
 			err2 = sipsp.ErrURITooShort
 		}
-	} else {
+	} else if len(c) != 0 {
 		err2, _ = sipsp.ParseURI(c, &cURI)
 	}
 	if err1 != 0 || err2 != 0 {
@@ -933,7 +961,9 @@ func updateRegCache(event EventType, e *CallEntry, aor []byte, c []byte) (bool, 
 
 	//DBG("updateRegCache: %s for %p: %q:%q:%q aor %q c %q regBinding %p\n", event.String(), e, e.Key.GetCallID(), e.Key.GetFromTag(), e.Key.GetToTag(), aor, c, e.regBinding)
 	switch event {
-	case EvRegNew:
+	case EvRegNew, EvRegFetch:
+		eventForceNone := false
+		skipCacheAdd := false
 		cstHash.HTable[e.hashNo].Lock()
 		// reset a possible delayed reg-del flag
 		if e.Flags&CFRegDelDelayed != 0 {
@@ -941,7 +971,7 @@ func updateRegCache(event EventType, e *CallEntry, aor []byte, c []byte) (bool, 
 			if !e.EvFlags.Test(EvRegDel) {
 				// if no RegDel generated, don't generate an EvRegNew
 				// if this entry was on delayed delete
-				event = EvNone
+				eventForceNone = true
 				regHash.cnts.grp.Inc(regHash.cnts.hNewMDelayedE)
 			}
 		}
@@ -975,24 +1005,37 @@ func updateRegCache(event EventType, e *CallEntry, aor []byte, c []byte) (bool, 
 			regHash.HTable[h].Lock()
 			rb := regHash.HTable[h].FindBindingUnsafe(&aorURI, aor, &cURI, c)
 			if rb != nil {
-				//DBG("updateRegCache: found existing binding %p: %q->%q ce %p\n", rb, rb.AOR.Get(rb.buf), rb.Contact.Get(rb.buf), rb.ce)
-				// if cached entry (aor, contact) found => this is a REG with diff.
-				//   CallId for an // existing aor,contact pair => do not generate
-				// an EvRegNew
-				event = EvNone
-				e.Flags |= CFRegBSeen // somebody else has it => steal it
-				// remove from hash
-				regHash.HTable[h].Rm(rb)
-				regHash.HTable[h].DecStats()
-				regHash.entries.Dec(1)
-				regHash.cnts.grp.Dec(regHash.cnts.hActive)
-				ce = rb.ce
-				rb.ce = nil // unref ce latter
-				rb.Unref()  // no longer in the hash
+				// if cached entry (aor, contact) found => this is a REG
+				// with diff.  CallId for an  existing aor,contact pair =>
+				// do not generate an EvRegNew
+				if event == EvRegNew {
+					eventForceNone = true
+					e.Flags |= CFRegBSeen // somebody else has it => steal it
+					// remove from hash
+					regHash.HTable[h].Rm(rb)
+					regHash.HTable[h].DecStats()
+					regHash.entries.Dec(1)
+					regHash.cnts.grp.Dec(regHash.cnts.hActive)
+					ce = rb.ce
+					rb.ce = nil // unref ce latter
+					rb.Unref()  // no longer in the hash
+				} else if event == EvRegFetch {
+					// cached entry found, ignore
+					eventForceNone = true
+					skipCacheAdd = true
+				}
 				regHash.cnts.grp.Inc(regHash.cnts.hNewDiffCid)
 				// later generate a quick expire for the  linked CallEntry
 			}
-			if nRegE != nil {
+			if skipCacheAdd && nRegE != nil {
+				// don't add new register entry => delete nRegE
+				e.regBinding = nil
+				nRegE.ce = nil
+				e.Unref()
+				nRegE.Unref()
+				nRegE.hashNo = 0
+				// not in the reghash so no need to dec() stats
+			} else if nRegE != nil {
 				maxRegEntries := GetCfg().Mem.MaxRegEntries
 				if regHash.entries.Inc(1) > maxRegEntries &&
 					maxRegEntries > 0 {
@@ -1047,6 +1090,12 @@ func updateRegCache(event EventType, e *CallEntry, aor []byte, c []byte) (bool, 
 				}
 				cstHash.HTable[ce.hashNo].Unlock()
 				ce.Unref() // no longer ref'ed from the RegEntry
+			}
+			if eventForceNone {
+				event = EvNone
+			} else if event == EvRegFetch {
+				// TODO: config option: if in restart grace period EvRegNew?
+				event = EvNone
 			}
 
 			if nRegE == nil {
