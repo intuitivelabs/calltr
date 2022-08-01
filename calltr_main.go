@@ -502,8 +502,15 @@ func forkCallEntry(e *CallEntry, m *sipsp.PSIPMsg, dir int, match CallMatchType,
 		n.lastEv = e.lastEv          // debugging
 		n.CreatedTS = e.CreatedTS    // debugging
 		n.forkedTS = timestamp.Now() // debugging
+		// Add attrs from the previous entry, but skip over Contacts:
+		// for requests skip both UAC & UAS contact (use UAC from request)
+		// and for fork on reply copy UAC Contact but not UAS.
 		// not sure about keeping Attrs Reason (?)
-		n.Info.AddFromCi(&e.Info, 0)
+		if m.FL.Request() {
+			n.Info.AddFromCi(&e.Info, AttrContact1.Flag()|AttrContact2.Flag())
+		} else {
+			n.Info.AddFromCi(&e.Info, AttrContact2.Flag())
+		}
 		n.Flags |= CFForkChild
 		e.Flags |= CFForkParent
 		// don't inherit any normal call Flags
