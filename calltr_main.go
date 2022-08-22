@@ -998,6 +998,7 @@ func updateRegCache(event EventType, e *CallEntry, aor []byte, c []byte) (bool, 
 			// attaching it to the current CallEntry => way more complex for
 			// a very little memory usage gain).
 			nRegE := newRegEntry(&aorURI, aor, &cURI, c)
+			nRegEfail := false
 			if nRegE != nil {
 				nRegE.Ref()
 				e.Ref()
@@ -1005,6 +1006,7 @@ func updateRegCache(event EventType, e *CallEntry, aor []byte, c []byte) (bool, 
 				e.regBinding = nRegE
 				nRegE.hashNo = h
 			} else {
+				nRegEfail = true
 				regHash.cnts.grp.Inc(regHash.cnts.hFailNew)
 			}
 			// check if the current binding is not in the cache
@@ -1039,8 +1041,9 @@ func updateRegCache(event EventType, e *CallEntry, aor []byte, c []byte) (bool, 
 				e.regBinding = nil
 				nRegE.ce = nil
 				e.Unref()
-				nRegE.Unref()
 				nRegE.hashNo = 0
+				nRegE.Unref()
+				nRegE = nil
 				// not in the reghash so no need to dec() stats
 			} else if nRegE != nil {
 				maxRegEntries := GetCfg().Mem.MaxRegEntries
@@ -1052,6 +1055,7 @@ func updateRegCache(event EventType, e *CallEntry, aor []byte, c []byte) (bool, 
 					nRegE.ce = nil
 					nRegE.Unref() // will auto-free on 0 refcnt
 					nRegE = nil
+					nRegEfail = true // hard limit failure
 					//event = EvNone
 					regHash.entries.Dec(1)
 					regHash.cnts.grp.Inc(regHash.cnts.hFailLimEx)
@@ -1091,12 +1095,14 @@ func updateRegCache(event EventType, e *CallEntry, aor []byte, c []byte) (bool, 
 						//DBG("updateRegCache: quick expire old ce %p: %q:%q:%q regBinding %p new EvFlags %q\n", ce, ce.Key.GetCallID(), ce.Key.GetFromTag(), ce.Key.GetToTag(), ce.regBinding, ce.EvFlags.String())
 					} // else already detached on waiting for 0 refcnt => nop
 					rb.Unref() // no longer ref'ed from the CallEntry
+					rb = nil   // no local ref. => cannot be used anymore
 				} else {
 					// else somebody already removed ce.regBinding => bail out
 					regHash.cnts.grp.Inc(regHash.cnts.hNewBRace)
 				}
 				cstHash.HTable[ce.hashNo].Unlock()
 				ce.Unref() // no longer ref'ed from the RegEntry
+				ce = nil
 			}
 			if eventForceNone {
 				event = EvNone
@@ -1105,7 +1111,7 @@ func updateRegCache(event EventType, e *CallEntry, aor []byte, c []byte) (bool, 
 				event = EvNone
 			}
 
-			if nRegE == nil {
+			if nRegEfail {
 				ERR("failed to allocate new RegEntry for (%q->%q)\n", aor, c)
 				return false, event
 			}
@@ -1167,13 +1173,14 @@ func regDelNow(e *CallEntry,
 			regHash.entries.Dec(1)
 			regHash.cnts.grp.Dec(regHash.cnts.hActive)
 			rb.ce = nil
-			rb.Unref() // no longer in the hash
+			rb.Unref() // no longer in the hash, but still ref. from e
 			deleted++
 		}
 		regHash.HTable[h].Unlock()
 		e.regBinding = nil
 		rb.Unref() // no longer ref'ed from the CallEntry
-		e.Unref()  // no longer ref'ed from the RegEntry
+		rb = nil
+		e.Unref() // no longer ref'ed from the RegEntry
 	}
 	cstHash.HTable[e.hashNo].Unlock()
 	// extra safety: delete all other matching reg bindings
@@ -1203,7 +1210,7 @@ func regDelNow(e *CallEntry,
 		ce := rb.ce
 		rb.ce = nil
 		regHash.HTable[h].Unlock()
-		rb.Unref() // no longer in the hash
+		rb.Unref() // no longer in the hash, but still ref. from ce
 		if ce != nil {
 			cstHash.HTable[ce.hashNo].Lock()
 			if ce.regBinding == rb {
@@ -1234,9 +1241,17 @@ func regDelNow(e *CallEntry,
 				} // else already detached on waiting for 0 refcnt =>
 				// do nothing
 				rb.Unref() // no longer ref'ed from the CallEntry
-			} // else somebody changed ce.regBinding in the meantime => bail out
+				rb = nil
+			} else {
+				// else somebody changed ce.regBinding in the meantime =>
+				// bail out
+				rb = nil // dbg, make sure rb cannot be used
+			}
 			cstHash.HTable[ce.hashNo].Unlock()
 			ce.Unref() // no longer ref'ed from the RegEntry
+			ce = nil
+		} else {
+			rb = nil // dbg, should never be here (ce != nil)
 		}
 	}
 	regHash.cnts.grp.Set(regHash.cnts.hDelMaxM, counters.Val(matching))
@@ -1351,8 +1366,9 @@ retry:
 						e.regBinding = nil
 						nRegE.ce = nil
 						e.Unref()
-						nRegE.Unref()
 						nRegE.hashNo = 0
+						nRegE.Unref()
+						nRegE = nil
 
 						// consider the found entry to be the newest =>
 						// ignore delayed del for the current entry
@@ -1446,6 +1462,7 @@ retry:
 			} // else somebody changed ce.regBinding in the meantime => bail out
 			cstHash.HTable[ce.hashNo].Unlock()
 			ce.Unref() // relinquish our temporary ref from above
+			ce = nil   // dbg: force failure if ce is reused
 		}
 	}
 	if betterMatch {
