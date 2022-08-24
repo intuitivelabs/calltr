@@ -520,7 +520,8 @@ func updateStateRepl(e *CallEntry, m *sipsp.PSIPMsg, dir int) (CallState, Timeou
 		case mstatus >= 200:
 			switch prevState {
 			case CallStInit:
-				// 2xx reply for which we haven't seen the request => recover
+				// 2xx reply for which we haven't seen the request (=> recover)
+				// or forked entry on reply
 				if mmethod == sipsp.MInvite {
 					newState = CallStEstablished
 					event = EvCallStart
@@ -528,17 +529,36 @@ func updateStateRepl(e *CallEntry, m *sipsp.PSIPMsg, dir int) (CallState, Timeou
 					newState = CallStNonInvFinished
 					if mmethod == sipsp.MRegister {
 						// reply to REGISTER without seeing the request
-						event = EvRegNew
-						exp, _ := m.PV.MaxExpires()
-						to = TimeoutS(exp)
-						// if to == 0 it is either set explicitly to 0
-						// in the REGISTER or no Expires or Contact headers
-						// are present, in both case => delete
-						// note however that a REGISTER reply with a 0 expire
-						// contact is highly improbable.
-						if to == 0 {
-							// 0 timeout => it's a delete
-							event = EvRegDel
+						//   or forked entry on reply
+
+						preForkState := CallStNone
+						// check for new forked entry
+						if (e.Flags & CFForkChild) != 0 {
+							preForkState = e.prevState.Last()
+						}
+						if preForkState != CallStInit &&
+							preForkState != CallStNone {
+							// just forked from something that
+							// was not in CallStInit => it most
+							// likely did see a REG request
+							// REGISTER special HACK
+							event, to, toFlags = handleRegRepl(e, m)
+						} else {
+							// fallback to reg reply w/o seeing a request
+							// => consider it a reg-new (although it could
+							// be a reg-fetch too)
+							event = EvRegNew
+							exp, _ := m.PV.MaxExpires()
+							to = TimeoutS(exp)
+							// if to == 0 it is either set explicitly to 0
+							// in the REGISTER or no Expires or Contact headers
+							// are present, in both case => delete
+							// note however that a REGISTER reply with a 0 expire
+							// contact is highly improbable.
+							if to == 0 {
+								// 0 timeout => it's a delete
+								event = EvRegDel
+							}
 						}
 					}
 				}

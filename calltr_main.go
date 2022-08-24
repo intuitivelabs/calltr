@@ -804,6 +804,8 @@ endLocked:
 			//          in req or on reply out-of-the-blue -> check
 			//          handleRegRepl()).
 			if ev == EvRegNew { // reg-fetch - ignored
+				BUG("EvRegNew instead of EvRegFetch for %p  Flags %s"+
+					" EvFlags %s\n", e, e.Flags, e.EvFlags)
 				ev = EvRegFetch // should be already handled in updateState()
 			}
 			regHash.cnts.grp.Inc(regHash.cnts.hRegNoC)
