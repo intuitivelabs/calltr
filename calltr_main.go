@@ -370,6 +370,7 @@ func forkCallEntry(e *CallEntry, m *sipsp.PSIPMsg, dir int, match CallMatchType,
 					// partial match that looks like a retr...=> do nothing
 					// let updateState treat it as a retr.
 					// and don't update the to-tag
+					e.Flags |= CFReused
 					return e
 				} else {
 					// update to-tag, if request or not 100
@@ -403,6 +404,7 @@ func forkCallEntry(e *CallEntry, m *sipsp.PSIPMsg, dir int, match CallMatchType,
 						(!m.Request() && replRetr(e, m, dir)) {
 						// partial match that looks like a retr...=> do nothing
 						// let updateState to treat it as a retr.
+						e.Flags |= CFReused
 						return e
 					} else {
 						// not a retr. -> update ToTag
@@ -455,6 +457,7 @@ func forkCallEntry(e *CallEntry, m *sipsp.PSIPMsg, dir int, match CallMatchType,
 						mChdr := m.PV.Contacts.GetContact(0)
 						if mChdr == nil && e.Info.Attrs[AttrContact1].Empty() {
 							// TODO: check for matching AOR?
+							e.Flags |= CFReused
 							return e
 						}
 						if mChdr != nil {
@@ -465,6 +468,7 @@ func forkCallEntry(e *CallEntry, m *sipsp.PSIPMsg, dir int, match CallMatchType,
 								sipsp.URICmpSkipPort)
 							if eq {
 								// TODO: check for matching AOR?
+								e.Flags |= CFReused
 								return e
 							}
 						}
@@ -472,6 +476,7 @@ func forkCallEntry(e *CallEntry, m *sipsp.PSIPMsg, dir int, match CallMatchType,
 					}
 				} else {
 					// not REGISTER or not request
+					e.Flags |= CFReused
 					return e
 				}
 				/// fallback to forking
@@ -511,9 +516,9 @@ func forkCallEntry(e *CallEntry, m *sipsp.PSIPMsg, dir int, match CallMatchType,
 		} else {
 			n.Info.AddFromCi(&e.Info, AttrContact2.Flag())
 		}
+		// don't inherit any normal call Flags
 		n.Flags |= CFForkChild
 		e.Flags |= CFForkParent
-		// don't inherit any normal call Flags
 		// keep ev flags, don't want to regen. seen EVs in forked calls
 		// exception: REGISTER hack - since register EVs are now handled by the
 		//  register binding cache, we don't inherit them in forked REGISTER
@@ -855,7 +860,7 @@ endLocked:
 						ev.String())
 				}
 				// if contact is empty (reg-fetch or missing original request),
-				// use  instead all of the 1st contact in the reply
+				// use  instead the 1st contact in the reply
 				// (the current version supports only one regentry per
 				//  call-entry so we cannot add all the contacts)
 				if !m.FL.Request() {
@@ -1027,7 +1032,7 @@ func updateRegCache(event EventType, e *CallEntry, aor []byte, c []byte) (bool, 
 					regHash.cnts.grp.Dec(regHash.cnts.hActive)
 					ce = rb.ce
 					rb.ce = nil // unref ce latter
-					rb.Unref()  // no longer in the hash
+					rb.Unref() // no longer in the hash, but sill Ref from ce
 				} else if event == EvRegFetch {
 					// cached entry found, ignore
 					eventForceNone = true
