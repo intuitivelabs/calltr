@@ -87,7 +87,7 @@ const (
 	EvParseErrF     EventFlags = (EventFlags)(1) << EvParseErr
 	EvNonSIPprobeF  EventFlags = (EventFlags)(1) << EvNonSIPprobe
 
-	EvRegMaskF EventFlags = EvRegNewF | EvRegDelF | EvRegExpiredF
+	EvRegMaskF EventFlags = EvRegNewF | EvRegDelF | EvRegExpiredF | EvRegFetchF
 )
 
 // returns previous value
