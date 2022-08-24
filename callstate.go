@@ -923,6 +923,15 @@ func (s *StateBackTrace) Add(cs CallState) {
 	s.N++
 }
 
+// Last returns the top callstate.
+// On error (no state recorded) it returns CallStNone.
+func (s *StateBackTrace) Last() CallState {
+	if s.N > 0 {
+		return s.PrevState[int(s.N-1)%len(s.PrevState)]
+	}
+	return CallStNone
+}
+
 func (s *StateBackTrace) String() string {
 	var i uint
 	var str string
