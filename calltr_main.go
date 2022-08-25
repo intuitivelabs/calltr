@@ -1039,9 +1039,22 @@ func updateRegCache(event EventType, e *CallEntry, aor []byte, c []byte) (bool, 
 					// cached entry found, ignore
 					eventForceNone = true
 					skipCacheAdd = true
+					// generate a quick expire for the reg-fetch CallEntry
+					// reset a possible RegDelDelayed flag
+					e.Flags &= ^CFRegDelDelayed
+					// and  a possible generated EvRegNew flag (more for dbg)
+					e.EvFlags.Clear(EvRegNew)
+					if !cstHash.HTable[e.hashNo].Detached(e) {
+						//  force short delete timeout
+						csTimerUpdateTimeoutUnsafe(e,
+							time.Duration(e.State.TimeoutS())*time.Second,
+							FTimerUpdForce)
+						//  update ev. flags (fake RegDel)
+						e.EvFlags.Set(EvRegDel)
+						e.lastEv = EvRegDel
+					} // else already detached on waiting for 0 refcnt => nop
 				}
 				regHash.cnts.grp.Inc(regHash.cnts.hNewDiffCid)
-				// later generate a quick expire for the  linked CallEntry
 			}
 			if skipCacheAdd && nRegE != nil {
 				// don't add new register entry => delete nRegE
