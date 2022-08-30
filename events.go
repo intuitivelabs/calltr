@@ -394,7 +394,7 @@ func (d *EventData) Fill(ev EventType, e *CallEntry) int {
 			if err, _ := sipsp.ParseURI(c, &pCuri); err == 0 {
 				sURI := pCuri.Short() // uri without params or headers
 				n = addPField(&sURI, c, &d.Attrs[i], &d.Buf, &d.Used, -1)
-				if n != int(e.Info.Attrs[i].Len) {
+				if n != int(sURI.Len) {
 					d.Truncated = true
 					break
 				}
