@@ -204,6 +204,8 @@ func (lst *CallEntryLst) Find(callid, ftag, ttag []byte, cseq uint32,
 	var callidMatch *CallEntry
 	var partialMatch *CallEntry
 	var partialMDir int
+	var fullMatch *CallEntry
+	var fullMDir int
 
 	for e := lst.head.next; e != &lst.head; e = e.next {
 		mt, dir := e.match(callid, ftag, ttag)
@@ -214,7 +216,12 @@ func (lst *CallEntryLst) Find(callid, ftag, ttag []byte, cseq uint32,
 			// (if methods are the same and no to-tag present in both sides
 			// return CallFullMatch)
 			if len(ttag) != 0 || method == e.Method {
-				return e, mt, dir
+				// handle possible multiple full matches
+				// (e.g. register forked entries due to diff. contacts
+				//  that receive replies with same to-tag)
+				fullMatch, fullMDir = chooseCallIDMatch(
+					e, dir, fullMatch, fullMDir, cseq, status, method)
+				break
 			}
 			// else:
 			mt = CallPartialMatch
@@ -241,6 +248,65 @@ func (lst *CallEntryLst) Find(callid, ftag, ttag []byte, cseq uint32,
 			callidMatch, _ = chooseCallIDMatch(
 				e, dir, callidMatch, 0, cseq, status, method)
 		case CallNoMatch: // do nothing
+		}
+	}
+	if fullMatch != nil {
+		if partialMatch != nil {
+			// choose between fullMatch & partialMatch
+			// 1. prefer matching methods
+			// 2. if methods == the same, prefer matching CSeq
+			// 3. if no matching CSeq, prefer entry for which CSeq
+			//    is greater then the entries CSeq
+			// 4. if CSeq greater or smaller then both entries, prefer
+			//    the entry with the smaller distance
+			// Note: most of this code is similar to chooseCallIDMatch(),
+			//       but there are small differences (prefer fullMatch
+			//       if no clear method or cseq winner)
+			if fullMatch.Method != partialMatch.Method {
+				if fullMatch.Method == method {
+					return fullMatch, CallFullMatch, fullMDir
+				}
+				if partialMatch.Method == method {
+					return partialMatch, CallPartialMatch, partialMDir
+				}
+			}
+			if cseq == fullMatch.CSeq[fullMDir] ||
+				fullMatch.CSeq[fullMDir] == partialMatch.CSeq[partialMDir] {
+				// if cseq matches full match entry or partial &
+				// full match have the same cseq => return full match
+				return fullMatch, CallFullMatch, fullMDir
+			} else if cseq == partialMatch.CSeq[partialMDir] {
+				return partialMatch, CallPartialMatch, partialMDir
+			}
+			// cseq does not match any of the entries
+			// prefer an older cseq (=> fork) to a newer one (retr)
+			if (cseq >= fullMatch.CSeq[fullMDir]) &&
+				(cseq < partialMatch.CSeq[partialMDir]) {
+				return fullMatch, CallFullMatch, fullMDir
+			}
+			if (cseq < fullMatch.CSeq[fullMDir]) &&
+				(cseq >= partialMatch.CSeq[partialMDir]) {
+				return partialMatch, CallPartialMatch, partialMDir
+			}
+			// cseq does not match and is either less then both
+			// entries or greater then both => smallest distance
+			var dcseqF, dcseqP uint32
+			if cseq >= fullMatch.CSeq[fullMDir] {
+				dcseqF = cseq - fullMatch.CSeq[fullMDir]
+			} else {
+				dcseqF = fullMatch.CSeq[fullMDir] - cseq
+			}
+			if cseq >= partialMatch.CSeq[partialMDir] {
+				dcseqP = cseq - partialMatch.CSeq[partialMDir]
+			} else {
+				dcseqP = partialMatch.CSeq[partialMDir] - cseq
+			}
+			if dcseqP <= dcseqF {
+				return partialMatch, CallPartialMatch, partialMDir
+			}
+			return fullMatch, CallFullMatch, fullMDir
+		} else {
+			return fullMatch, CallFullMatch, fullMDir
 		}
 	}
 	if partialMatch == nil {
