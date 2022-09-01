@@ -507,14 +507,28 @@ func forkCallEntry(e *CallEntry, m *sipsp.PSIPMsg, dir int, match CallMatchType,
 		n.lastEv = e.lastEv          // debugging
 		n.CreatedTS = e.CreatedTS    // debugging
 		n.forkedTS = timestamp.Now() // debugging
-		// Add attrs from the previous entry, but skip over Contacts:
-		// for requests skip both UAC & UAS contact (use UAC from request)
-		// and for fork on reply copy UAC Contact but not UAS.
-		// not sure about keeping Attrs Reason (?)
-		if m.FL.Request() {
-			n.Info.AddFromCi(&e.Info, AttrContact1.Flag()|AttrContact2.Flag())
+		if dir == 0 {
+			// req from UAC -> UAS, reply from UAS -> UAC
+			// Add attrs from the previous entry, but skip over Contacts:
+			// for requests skip both UAC & UAS contact (use UAC from request)
+			// and for fork on reply copy UAC Contact but not UAS.
+			// not sure about keeping Attrs Reason (?)
+			if m.FL.Request() {
+				n.Info.AddFromCi(&e.Info,
+					AttrContact1.Flag()|AttrContact2.Flag())
+			} else {
+				n.Info.AddFromCi(&e.Info, AttrContact2.Flag())
+			}
 		} else {
-			n.Info.AddFromCi(&e.Info, AttrContact2.Flag())
+			// req from UAS -> UAC, reply from UAC -> UAS
+			if m.FL.Request() {
+				// UAS -> UAC  req: skip copying both contacts
+				n.Info.AddFromCi(&e.Info,
+					AttrContact1.Flag()|AttrContact2.Flag())
+			} else {
+				// UAC -> UAS reply : skip UAC contact
+				n.Info.AddFromCi(&e.Info, AttrContact1.Flag())
+			}
 		}
 		// don't inherit any normal call Flags
 		n.Flags |= CFForkChild
