@@ -1044,13 +1044,103 @@ func (c *CallEntry) Unref() bool {
 	return false
 }
 
+// helper function for match: matches ip/port/proto according to mOpt
+func (c *CallEntry) matchEndPoint(mOpt CallMatchFlags, ni [2]NetInfo) (res bool) {
+	res = false
+	if mOpt&CallMatchIPsF != 0 {
+		if mOpt&CallMatchPortsF != 0 {
+			//  if 2 ports matching on, then check IP:port pairs
+			if !((c.EndPoint[0].Equal(ni[0]) &&
+				c.EndPoint[1].Equal(ni[1])) ||
+				(c.EndPoint[0].Equal(ni[1]) &&
+					c.EndPoint[1].Equal(ni[0]))) {
+				// IP:ports do not match either direct or reversed =>
+				// exit no match
+				return
+			}
+		} else if mOpt&CallMatch1PortF != 0 {
+			// if 1 port matching, then at least 1 IP:port must match +
+			// the other IP
+			if !((c.EndPoint[0].EqualIP(ni[0]) &&
+				c.EndPoint[1].EqualIP(ni[1]) &&
+				(c.EndPoint[0].Port == ni[0].Port ||
+					c.EndPoint[1].Port == ni[1].Port)) ||
+				(c.EndPoint[0].EqualIP(ni[1]) &&
+					c.EndPoint[1].EqualIP(ni[0]) &&
+					(c.EndPoint[0].Port == ni[1].Port ||
+						c.EndPoint[1].Port == ni[0].Port))) {
+				// IPs + 1 port do not match either direct or reversed =>
+				// exit no match
+				return
+			}
+		} else if !((c.EndPoint[0].EqualIP(ni[0]) &&
+			c.EndPoint[1].EqualIP(ni[1])) ||
+			(c.EndPoint[0].EqualIP(ni[1]) &&
+				c.EndPoint[1].EqualIP(ni[0]))) {
+			// IPs do not match either direct or reversed =>
+			// exit no match
+			return
+		}
+	} else if mOpt&CallMatch1IPF != 0 {
+		if mOpt&CallMatch1PortF != 0 {
+			// 1 IP and 1 port, must be the same "pair"
+			if !(c.EndPoint[0].Equal(ni[0]) ||
+				c.EndPoint[1].Equal(ni[0]) ||
+				c.EndPoint[0].Equal(ni[1]) ||
+				c.EndPoint[1].Equal(ni[1])) {
+				// no IP:port pair match => exit no match
+				return
+			}
+		} else if !(c.EndPoint[0].EqualIP(ni[0]) ||
+			c.EndPoint[1].EqualIP(ni[0]) ||
+			c.EndPoint[0].EqualIP(ni[1]) ||
+			c.EndPoint[1].EqualIP(ni[1])) {
+			// no port match => exit
+			return
+		}
+	} else if mOpt&CallMatchPortsF != 0 {
+		// check for both ports match (no IPs)
+		if !((c.EndPoint[0].Port == ni[0].Port &&
+			c.EndPoint[1].Port == ni[1].Port) ||
+			(c.EndPoint[0].Port == ni[1].Port &&
+				c.EndPoint[1].Port == ni[0].Port)) {
+			// ports do not match either direct or reversed =>
+			// exit no match
+			return
+		}
+	} else if mOpt&CallMatch1PortF != 0 {
+		// check for single port match (no IP)
+		if !(c.EndPoint[0].Port == ni[0].Port ||
+			c.EndPoint[1].Port == ni[0].Port ||
+			c.EndPoint[0].Port == ni[1].Port ||
+			c.EndPoint[1].Port == ni[1].Port) {
+			// no port match => exit
+			return
+		}
+	}
+	if mOpt&CallMatchProtoF != 0 {
+		if c.EndPoint[0].Proto() != ni[0].Proto() {
+			// protocols mismatch
+			return
+		}
+	}
+	res = true
+	return
+}
+
 // match returns the "matching type" between the current call entry and
 // a callid, fromtag and totag extracted from a message.
 // If it matches in the reverse direction (e.g. msg. from callee, call entry
 // created based on caller message) the returned dir will be 1.
-func (c *CallEntry) match(callid, fromtag, totag []byte) (m CallMatchType, dir int) {
+func (c *CallEntry) match(mOpt CallMatchFlags,
+	callid, fromtag, totag []byte,
+	ni [2]NetInfo) (m CallMatchType, dir int) {
 	m = CallNoMatch
 	dir = 0
+	// check for ip/port/protocol matches first (according to mOpt)
+	if mOpt != CallMatchStd && !c.matchEndPoint(mOpt, ni) {
+		return
+	}
 	if (int(c.Key.CallID.Len) != len(callid)) ||
 		!bytes.Equal(c.Key.GetCallID(), callid) {
 		return

@@ -31,15 +31,31 @@ type MemConfig struct {
 	MaxRegEntriesMem  uint64 // maximum memory for registration bindings
 }
 
+type CallMatchFlags uint32
+
 type Config struct {
-	RegDelta          uint32 // registration expire delta in s, added to expire timeouts
-	RegDelDelay       int32  // delay in generating EvRegDel in s
-	ContactIgnorePort bool   // ignore port when comparing contacts (but not in AORs)
+	RegDelta          uint32         // registration expire delta in s, added to expire timeouts
+	RegDelDelay       int32          // delay in generating EvRegDel in s
+	ContactIgnorePort bool           // ignore port when comparing contacts (but not in AORs)
+	CallMatchOpt      CallMatchFlags // options for matching call entries
 	Mem               MemConfig
 	Dbg               DbgFlags
 	// per state timeout in s, used at runtime
 	stateTimeoutS [len(defaultStateTimeoutS)]uint32
 }
+
+const CallMatchStd CallMatchFlags = 0 // standard: call-id + from-tag + ?to-tag
+
+const (
+	CallMatch1IPF   = 1 << iota // match at least 1 IP
+	CallMatchIPsF               // match both IPs
+	CallMatch1PortF             // match at least 1 port
+	CallMatchPortsF             // match both ports
+	CallMatchProtoF             // match protocols (e.g. UDP, TCP...)
+)
+
+//const CallMatchDef = CallMatchStd // default value
+const CallMatchDef = CallMatchIPsF | CallMatch1PortF | CallMatchProtoF // default value
 
 var crtCfg *Config = &DefaultConfig
 
@@ -47,6 +63,7 @@ var DefaultConfig = Config{
 	RegDelta:          0,
 	RegDelDelay:       0,
 	ContactIgnorePort: false,
+	CallMatchOpt:      CallMatchDef,
 	Mem: MemConfig{
 		MaxCallEntries:    0,
 		MaxCallEntriesMem: 0,
@@ -672,12 +689,15 @@ func ProcessMsg(m *sipsp.PSIPMsg, ni [2]NetInfo, f HandleEvF, evd *EventData,
 
 	cstHash.HTable[hashNo].Lock()
 
-	e, match, dir := cstHash.HTable[hashNo].Find(m.PV.Callid.CallID.Get(m.Buf),
+	mOpt := GetCfg().CallMatchOpt
+	e, match, dir := cstHash.HTable[hashNo].Find(mOpt,
+		m.PV.Callid.CallID.Get(m.Buf),
 		m.PV.From.Tag.Get(m.Buf),
 		m.PV.To.Tag.Get(m.Buf),
 		m.PV.CSeq.CSeqNo,
 		m.FL.Status,
-		m.Method())
+		m.Method(),
+		ni)
 	switch match {
 	case CallNoMatch:
 		if flags&CallStProcessNew != 0 {

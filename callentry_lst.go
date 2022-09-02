@@ -198,8 +198,10 @@ func (lst *CallEntryLst) ForEachSafeRm(f func(e *CallEntry, l *CallEntryLst) boo
 // match direction (0 for caller -> callee  and 1 for callee -> caller)
 // It does not use internal locking. Call it between Lock() / Unlock() to
 // be concurrency safe.
-func (lst *CallEntryLst) Find(callid, ftag, ttag []byte, cseq uint32,
-	status uint16, method sipsp.SIPMethod) (*CallEntry, CallMatchType, int) {
+func (lst *CallEntryLst) Find(mOpt CallMatchFlags,
+	callid, ftag, ttag []byte, cseq uint32,
+	status uint16, method sipsp.SIPMethod,
+	ni [2]NetInfo) (*CallEntry, CallMatchType, int) {
 
 	var callidMatch *CallEntry
 	var partialMatch *CallEntry
@@ -208,7 +210,7 @@ func (lst *CallEntryLst) Find(callid, ftag, ttag []byte, cseq uint32,
 	var fullMDir int
 
 	for e := lst.head.next; e != &lst.head; e = e.next {
-		mt, dir := e.match(callid, ftag, ttag)
+		mt, dir := e.match(mOpt, callid, ftag, ttag, ni)
 		switch mt {
 		case CallFullMatch:
 			//  don't FullMatch if no to-tag is present (on both sides),
