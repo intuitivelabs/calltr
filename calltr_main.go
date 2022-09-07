@@ -32,12 +32,14 @@ type MemConfig struct {
 }
 
 type CallMatchFlags uint32
+type ConfigFlags uint64
 
 type Config struct {
 	RegDelta          uint32         // registration expire delta in s, added to expire timeouts
 	RegDelDelay       int32          // delay in generating EvRegDel in s
 	ContactIgnorePort bool           // ignore port when comparing contacts (but not in AORs)
 	CallMatchOpt      CallMatchFlags // options for matching call entries
+	Flags             ConfigFlags    // various other bool. options
 	Mem               MemConfig
 	Dbg               DbgFlags
 	// per state timeout in s, used at runtime
@@ -57,6 +59,10 @@ const (
 //const CallMatchDef = CallMatchStd // default value
 const CallMatchDef = CallMatchIPsF | CallMatch1PortF | CallMatchProtoF // default value
 
+const (
+	CfgRegFetchEvF = 1 << iota // generate reg-fetch event if no binding
+)
+
 var crtCfg *Config = &DefaultConfig
 
 var DefaultConfig = Config{
@@ -64,6 +70,7 @@ var DefaultConfig = Config{
 	RegDelDelay:       0,
 	ContactIgnorePort: false,
 	CallMatchOpt:      CallMatchDef,
+	Flags:             CfgRegFetchEvF,
 	Mem: MemConfig{
 		MaxCallEntries:    0,
 		MaxCallEntriesMem: 0,
@@ -1161,8 +1168,10 @@ func updateRegCache(event EventType, e *CallEntry, aor []byte, c []byte) (bool, 
 			if eventForceNone {
 				event = EvNone
 			} else if event == EvRegFetch {
-				// TODO: config option: if in restart grace period EvRegNew?
-				event = EvNone
+				if GetCfg().Flags&CfgRegFetchEvF == 0 {
+					// don't generate RegFetch events
+					event = EvNone
+				} // else gen. regfetch event (regfetch w/o existing binding)
 			}
 
 			if nRegEfail {
