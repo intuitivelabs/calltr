@@ -80,7 +80,8 @@ import (
 //          not use pointers to go allocated objects (or GC might delete
 //          them)
 type RegEntry struct {
-	next, prev *RegEntry // links into the reg. bindings hash
+	next, prev *RegEntry  // links into the reg. bindings hash
+	EndPoints  [2]NetInfo // src & dst ip:port for the binding creating msg
 	AOR        sipsp.PField
 	Contact    sipsp.PField
 	AORURI     sipsp.PsipURI // parsed URI
@@ -351,8 +352,13 @@ func (lst *RegEntryLst) ForEachSafeRm(f func(e *RegEntry) bool) {
 // corresponding RegEntry. It does not use any locking (call it between
 //  Lock/Unlock() to be safe).
 // If no matching entry is found it returns nil
-func (lst *RegEntryLst) FindURIUnsafe(uri *sipsp.PsipURI, buf []byte) *RegEntry {
+func (lst *RegEntryLst) FindURIUnsafe(uri *sipsp.PsipURI, buf []byte,
+	mOpt CallMatchFlags, ni [2]NetInfo) *RegEntry {
 	for e := lst.head.next; e != &lst.head; e = e.next {
+		// check for ip/port/protocol matches first (according to mOpt)
+		if mOpt != CallMatchStd && !matchEndPoints(mOpt, e.EndPoints, ni) {
+			continue
+		}
 		if e.aorMatchURI(uri, buf) {
 			return e
 		}
@@ -368,9 +374,13 @@ func (lst *RegEntryLst) FindURIUnsafe(uri *sipsp.PsipURI, buf []byte) *RegEntry 
 // entries (even if they did not fit in the passed result array).
 // If no matching entry is found it returns 0.
 func (lst *RegEntryLst) MatchURIUnsafe(uri *sipsp.PsipURI, buf []byte,
-	res *[]*RegEntry) int {
+	mOpt CallMatchFlags, ni [2]NetInfo, res *[]*RegEntry) int {
 	var n int
 	for e := lst.head.next; e != &lst.head; e = e.next {
+		// check for ip/port/protocol matches first (according to mOpt)
+		if mOpt != CallMatchStd && !matchEndPoints(mOpt, e.EndPoints, ni) {
+			continue
+		}
 		if e.aorMatchURI(uri, buf) {
 			n++
 			if res != nil && cap(*res) > n {
@@ -389,7 +399,8 @@ func (lst *RegEntryLst) MatchURIUnsafe(uri *sipsp.PsipURI, buf []byte,
 //  Lock/Unlock() to be safe).
 // If no matching entry is found it returns nil
 func (lst *RegEntryLst) FindBindingUnsafe(aor *sipsp.PsipURI, abuf []byte,
-	contact *sipsp.PsipURI, cbuf []byte) *RegEntry {
+	contact *sipsp.PsipURI, cbuf []byte,
+	mOpt CallMatchFlags, ni [2]NetInfo) *RegEntry {
 	i := 0
 	cMatchFlgs := sipsp.URICmpAll
 	ignorePort := GetCfg().ContactIgnorePort
@@ -405,6 +416,10 @@ func (lst *RegEntryLst) FindBindingUnsafe(aor *sipsp.PsipURI, abuf []byte,
 			}
 		}
 		i++
+		// check for ip/port/protocol matches first (according to mOpt)
+		if mOpt != CallMatchStd && !matchEndPoints(mOpt, e.EndPoints, ni) {
+			continue
+		}
 		if e.aorMatchURI(aor, abuf) &&
 			e.contactMatchURI(contact, cbuf, cMatchFlgs) {
 			return e
@@ -422,7 +437,7 @@ func (lst *RegEntryLst) FindBindingUnsafe(aor *sipsp.PsipURI, abuf []byte,
 // If no matching entry is found it returns 0.
 func (lst *RegEntryLst) MatchBindingUnsafe(aor *sipsp.PsipURI, abuf []byte,
 	contact *sipsp.PsipURI, cbuf []byte,
-	res *[]*RegEntry) int {
+	mOpt CallMatchFlags, ni [2]NetInfo, res *[]*RegEntry) int {
 	var n int
 	i := 0
 	cMatchFlgs := sipsp.URICmpAll
@@ -439,6 +454,10 @@ func (lst *RegEntryLst) MatchBindingUnsafe(aor *sipsp.PsipURI, abuf []byte,
 			}
 		}
 		i++
+		// check for ip/port/protocol matches first (according to mOpt)
+		if mOpt != CallMatchStd && !matchEndPoints(mOpt, e.EndPoints, ni) {
+			continue
+		}
 		if e.aorMatchURI(aor, abuf) &&
 			e.contactMatchURI(contact, cbuf, cMatchFlgs) {
 			n++

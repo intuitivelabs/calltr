@@ -60,7 +60,10 @@ const (
 const CallMatchDef = CallMatchIPsF | CallMatch1PortF | CallMatchProtoF // default value
 
 const (
-	CfgRegFetchEvF = 1 << iota // generate reg-fetch event if no binding
+	// generate reg-fetch event if no binding present in the reg cache
+	CfgRegFetchEvF ConfigFlags = 1 << iota
+	// don't use match opts on register cache bindings
+	CfgRegNoMatchOptsF
 )
 
 var crtCfg *Config = &DefaultConfig
@@ -823,10 +826,15 @@ endLocked:
 	// update regCache
 	if ev == EvRegNew || ev == EvRegDel || ev == EvRegExpired ||
 		ev == EvRegFetch {
+		mRegOpts := mOpt
+		if GetCfg().Flags&CfgRegNoMatchOptsF != 0 {
+			mRegOpts = 0 // no ip:port reg binding matching
+		}
 		aor := m.PV.GetTo().URI.Get(m.Buf) // byte slice w/ To uri
 		// use the contact from the REGISTER request (AttrContact1) and not
 		// the contact from the reply (AttrContact2 or 1st contact in m)
 		c := e.Info.Attrs[AttrContact1].Get(e.Info.buf)
+		endPoints := e.EndPoint
 		// copy contact so that it would be valid after  e is unlocked
 		contact := make([]byte, len(c))
 		copy(contact, c)
@@ -896,7 +904,8 @@ endLocked:
 			}
 			cstHash.HTable[hashNo].Unlock()
 			if len(contact) != 0 {
-				_, ev = updateRegCache(ev, e, aor, contact)
+				// use proto:ip:port from the call entry (most likey request)
+				_, ev = updateRegCache(ev, e, aor, contact, mRegOpts, endPoints)
 			} else {
 				if ev != EvRegFetch && ev != EvRegNew {
 					BUG("no contacts and no reg-fetch or reg-new: %q\n",
@@ -910,7 +919,8 @@ endLocked:
 					mC := m.PV.Contacts.GetContact(0)
 					if mC != nil {
 						mCuri := mC.URI.Get(m.Buf)
-						_, ev = updateRegCache(ev, e, aor, mCuri)
+						_, ev = updateRegCache(ev, e, aor, mCuri, mRegOpts,
+							endPoints)
 					}
 					/* future version (w/ reg-cache decoupled from
 						   call-entries):
@@ -920,7 +930,8 @@ endLocked:
 							continue
 						}
 						mCuri := mC.URI.Get(m.Buf)
-						_, ev = updateRegCache(ev, e, aor, mCuri)
+						_, ev = updateRegCache(ev, e, aor, mCuri, mOpts,
+								endPoints)
 					}
 					*/
 				} else {
@@ -993,7 +1004,8 @@ func Track(m *sipsp.PSIPMsg, n [2]NetInfo, f HandleEvF) bool {
 //  an empty c means a REG fetch, and a  "*" c is valid (delete all).
 // WARNING: safe version, it must be called with the corresp. CallEntry hash
 // bucket UNlocked and with a reference held to e.
-func updateRegCache(event EventType, e *CallEntry, aor []byte, c []byte) (bool, EventType) {
+func updateRegCache(event EventType, e *CallEntry, aor []byte, c []byte,
+	mOpt CallMatchFlags, ni [2]NetInfo) (bool, EventType) {
 	var aorURI sipsp.PsipURI
 	var cURI sipsp.PsipURI
 	err1, _ := sipsp.ParseURI(aor, &aorURI)
@@ -1045,7 +1057,7 @@ func updateRegCache(event EventType, e *CallEntry, aor []byte, c []byte) (bool, 
 			// "stealing" the cached entry from the attached CallEntry and
 			// attaching it to the current CallEntry => way more complex for
 			// a very little memory usage gain).
-			nRegE := newRegEntry(&aorURI, aor, &cURI, c)
+			nRegE := newRegEntry(&aorURI, aor, &cURI, c, ni)
 			nRegEfail := false
 			if nRegE != nil {
 				nRegE.Ref()
@@ -1060,7 +1072,8 @@ func updateRegCache(event EventType, e *CallEntry, aor []byte, c []byte) (bool, 
 			// check if the current binding is not in the cache
 			var ce *CallEntry
 			regHash.HTable[h].Lock()
-			rb := regHash.HTable[h].FindBindingUnsafe(&aorURI, aor, &cURI, c)
+			rb := regHash.HTable[h].FindBindingUnsafe(&aorURI, aor, &cURI, c,
+				mOpt, ni)
 			if rb != nil {
 				// if cached entry (aor, contact) found => this is a REG
 				// with diff.  CallId for an  existing aor,contact pair =>
@@ -1190,13 +1203,14 @@ func updateRegCache(event EventType, e *CallEntry, aor []byte, c []byte) (bool, 
 		if delDelay > 0 {
 			// delay all entries corresponding to matching contacts in the
 			// registration cache
-			regDelDelay(e, aorURI, aor, cURI, c, matchAll, TimeoutS(delDelay))
+			regDelDelay(e, aorURI, aor, cURI, c, mOpt, ni,
+				matchAll, TimeoutS(delDelay))
 			// no event generated now
 			event = EvNone
 			// clear the RegDel generated flag...
 			e.EvFlags.Clear(EvRegDel)
 		} else {
-			regDelNow(e, aorURI, aor, cURI, c, matchAll)
+			regDelNow(e, aorURI, aor, cURI, c, mOpt, ni, matchAll)
 			// no change for the event
 		}
 	case EvRegExpired:
@@ -1214,6 +1228,7 @@ func updateRegCache(event EventType, e *CallEntry, aor []byte, c []byte) (bool, 
 func regDelNow(e *CallEntry,
 	aorURI sipsp.PsipURI, aor []byte,
 	cURI sipsp.PsipURI, c []byte,
+	mOpt CallMatchFlags, ni [2]NetInfo,
 	matchAll bool) {
 
 	matching := 0
@@ -1257,9 +1272,10 @@ func regDelNow(e *CallEntry,
 		if matchAll {
 			// "*" contact - everything was deleted -> remove all contacts
 			// for the AOR
-			rb = regHash.HTable[h].FindURIUnsafe(&aorURI, aor)
+			rb = regHash.HTable[h].FindURIUnsafe(&aorURI, aor, mOpt, ni)
 		} else {
-			rb = regHash.HTable[h].FindBindingUnsafe(&aorURI, aor, &cURI, c)
+			rb = regHash.HTable[h].FindBindingUnsafe(&aorURI, aor, &cURI, c,
+				mOpt, ni)
 		}
 		if rb == nil {
 			regHash.HTable[h].Unlock()
@@ -1336,6 +1352,7 @@ func regDelNow(e *CallEntry,
 func regDelDelay(e *CallEntry,
 	aorURI sipsp.PsipURI, aor []byte,
 	cURI sipsp.PsipURI, c []byte,
+	mOpt CallMatchFlags, ni [2]NetInfo,
 	matchAll bool, delDelay TimeoutS) {
 
 	delayed := 0
@@ -1391,10 +1408,11 @@ retry:
 	if matchAll {
 		// "*" contact - everything was deleted -> mark all contacts
 		// for the AOR
-		n = regHash.HTable[h].MatchURIUnsafe(&aorURI, aor, &mREntries)
+		n = regHash.HTable[h].MatchURIUnsafe(&aorURI, aor, mOpt, ni,
+			&mREntries)
 	} else {
 		n = regHash.HTable[h].MatchBindingUnsafe(&aorURI, aor, &cURI, c,
-			&mREntries)
+			mOpt, ni, &mREntries)
 	}
 	if n > cap(mREntries) {
 		regHash.HTable[h].Unlock()
@@ -1411,7 +1429,7 @@ retry:
 				// alloc and fill new reg entry cache for "this" CallEntry
 				// even if this is a delayed delete (to catch possible
 				// reg-new after initial reg-del).
-				nRegE := newRegEntry(&aorURI, aor, &cURI, c)
+				nRegE := newRegEntry(&aorURI, aor, &cURI, c, ni)
 				if nRegE != nil {
 					nRegE.Ref()
 					cstHash.HTable[e.hashNo].Lock()
@@ -1423,7 +1441,7 @@ retry:
 					// meantime
 					regHash.HTable[h].Lock()
 					rb := regHash.HTable[h].FindBindingUnsafe(&aorURI, aor,
-						&cURI, c)
+						&cURI, c, mOpt, ni)
 					if rb != nil {
 						// updated in the meantime => race => back off
 						e.regBinding = nil
@@ -1554,7 +1572,8 @@ end:
 
 // newRegEntry allocates & fills a new reg cache entry.
 // It returns the new entry (allocated using AllocRegEntry()) or nil.
-func newRegEntry(aorURI *sipsp.PsipURI, aor []byte, cURI *sipsp.PsipURI, c []byte) *RegEntry {
+func newRegEntry(aorURI *sipsp.PsipURI, aor []byte, cURI *sipsp.PsipURI,
+	c []byte, EndPoints [2]NetInfo) *RegEntry {
 	size := len(aor) + len(c) // TODO: shorter version, w/o params ?
 	nRegE := AllocRegEntry(uint(size))
 	if nRegE == nil {
@@ -1568,6 +1587,7 @@ func newRegEntry(aorURI *sipsp.PsipURI, aor []byte, cURI *sipsp.PsipURI, c []byt
 		FreeRegEntry(nRegE)
 		return nil
 	}
+	nRegE.EndPoints = EndPoints
 	return nRegE
 }
 
