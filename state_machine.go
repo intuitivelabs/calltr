@@ -708,6 +708,9 @@ var timeoutReason = []byte("internal: call state timeout")
 // finalTimeoutEv() should be called before destroying an expired call entry.
 // It returns the final EventType
 // unsafe, MUST be called w/ lock held or if no parallel access is possible
+// Note: when called e is already removed from the CallEntry hash and
+//       e.regBindind is already destroyed (removed from the hash and unref)
+//       so e.regBinding is always nil here.
 func finalTimeoutEv(e *CallEntry) EventType {
 
 	var forcedStatus uint16
@@ -766,6 +769,9 @@ func finalTimeoutEv(e *CallEntry) EventType {
 		// else if REGISTER, like above, do nothing
 	case CallStNonInvFinished:
 		if e.Method == sipsp.MRegister {
+			// Note: here e.regBinding is always nil (already removed prior
+			// to calling finalTimeoutEv()) and e is already removed from
+			// the call entry hash
 			// check for delayed reg-del
 			if e.Flags&CFRegDelDelayed != 0 {
 				if e.EvFlags.Test(EvRegNew) {

@@ -1770,12 +1770,23 @@ func PrintCallsFilter(w io.Writer, start, max int, op int, cid []byte, re *regex
 					e.prevState.String(),
 					e.refCnt, e.Timer.Expire.Sub(timestamp.Now())/time.Second,
 					e.regBinding)
+				fmt.Fprintf(w, "       protocol: %s %s:%d -> %s:%d\n",
+					e.EndPoint[0].ProtoName(),
+					e.EndPoint[0].IP(), e.EndPoint[0].Port,
+					e.EndPoint[1].IP(), e.EndPoint[1].Port)
 				if e.regBinding != nil {
 					lockRegEntry(e.regBinding)
-					fmt.Fprintf(w, "       REG Binding; %q -> %q (refcnt %d)\n",
+					fmt.Fprintf(w, "       REG Binding: %q -> %q"+
+						" (refcnt %d)\n"+
+						"                    %s %s:%d -> %s:%d\n",
 						e.regBinding.AOR.Get(e.regBinding.buf),
 						e.regBinding.Contact.Get(e.regBinding.buf),
-						e.regBinding.refCnt)
+						e.regBinding.refCnt,
+						e.regBinding.EndPoints[0].ProtoName(),
+						e.regBinding.EndPoints[0].IP(),
+						e.regBinding.EndPoints[0].Port,
+						e.regBinding.EndPoints[1].IP(),
+						e.regBinding.EndPoints[1].Port)
 					unlockRegEntry(e.regBinding)
 				}
 				printed++
@@ -1805,12 +1816,18 @@ func PrintRegBindingsFilter(w io.Writer, start, max int, op int,
 				print = matchRegEntry(r, op, cid, re)
 			}
 			if print && n >= start {
-				fmt.Fprintf(w, "%6d. REG Binding: %q -> %q (refcnt %d "+
-					"CallEntry: %p)\n",
+				fmt.Fprintf(w, "%6d. REG Binding: %q -> %q"+
+					" (refcnt %d CallEntry: %p)\n"+
+					"        %s %s:%d -> %s:%d\n",
 					n,
 					r.AOR.Get(r.buf),
 					r.Contact.Get(r.buf),
-					r.refCnt, r.ce)
+					r.refCnt, r.ce,
+					r.EndPoints[0].ProtoName(),
+					r.EndPoints[0].IP(),
+					r.EndPoints[0].Port,
+					r.EndPoints[1].IP(),
+					r.EndPoints[1].Port)
 				printed++
 				// TODO: print linked CallEntry -> locking ?
 			}
