@@ -224,6 +224,7 @@ type EventData struct {
 	ReplStatus uint16
 	CallID     sipsp.PField
 	Attrs      [AttrLast]sipsp.PField
+	ReqSig     sipsp.MsgSig // sip request signature (as defined in sipsp)
 
 	Rate EvRateInfo // event generation rate/blacklisted status
 
@@ -336,6 +337,8 @@ func (d *EventData) Fill(ev EventType, e *CallEntry) int {
 			forcedReason = fake2xxReason
 		}
 	}
+	// request msg signature
+	d.ReqSig = e.ReqSig
 
 	//debug stuff
 	d.ForkedTS = e.forkedTS
@@ -592,7 +595,8 @@ func (ed *EventData) String() string {
 			"	pdd       : %s ring time %s \n"+
 			"	protocol  : %s  %s:%d -> %s:%d\n"+
 			"	sip.call_id: %s\n"+
-			"	sip.response.status: %3d\n",
+			"	sip.response.status: %3d\n"+
+			"	sip.req_sig: %s\n",
 		ed.Type, ed.Truncated, ed.Valid, ed.Used, cap(ed.Buf),
 		ed.TS.Truncate(time.Second),
 		ed.CreatedTS.Truncate(time.Second),
@@ -602,7 +606,8 @@ func (ed *EventData) String() string {
 		pdd, ringt,
 		ed.ProtoF.ProtoName(), ed.Src, ed.SPort, ed.Dst, ed.DPort,
 		ed.CallID.Get(ed.Buf),
-		ed.ReplStatus)
+		ed.ReplStatus,
+		ed.ReqSig)
 	for i := 0; i < len(ed.Attrs); i++ {
 		if !ed.Attrs[i].Empty() {
 			s += fmt.Sprintf("	%s: %q\n",
