@@ -7,7 +7,7 @@ require (
 	github.com/intuitivelabs/bytespool v0.0.2
 	github.com/intuitivelabs/counters v0.3.1
 	github.com/intuitivelabs/mallocs/qmalloc v0.0.3
-	github.com/intuitivelabs/sipsp v1.1.5-0.20220930162834-fbad7981c330
+	github.com/intuitivelabs/sipsp v1.1.5-0.20221005195648-3cedf4947085
 	github.com/intuitivelabs/slog v0.0.2
 	github.com/intuitivelabs/timestamp v0.0.3
 	github.com/intuitivelabs/wtimer v0.0.2
