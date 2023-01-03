@@ -224,6 +224,16 @@ func newCallEntry(hashNo, cseq uint32, m *sipsp.PSIPMsg,
 	e.hashNo = hashNo
 	e.CSeq[dir] = cseq
 	e.Method = m.Method()
+	if m.Request() {
+		if sig, err := sipsp.GetMsgSig(m); err == sipsp.ErrHdrOk {
+			e.ReqSig = sig
+		} else {
+			if err == sipsp.ErrHdrTrunc {
+				e.ReqSig = sig
+			}
+			ERR("msg sig failed with err %d (%s)\n", err, err)
+		}
+	}
 	e.evHandler = evH
 	e.CreatedTS = timestamp.Now()
 	e.EndPoint = n
@@ -460,8 +470,16 @@ func forkCallEntry(e *CallEntry, m *sipsp.PSIPMsg, dir int, match CallMatchType,
 		// TODO:  make sure all the relevant entry data is cloned
 		if dir == 0 {
 			n.CSeq[1] = e.CSeq[1]
+			if !m.Request() {
+				// forked entry on reply from UAS, keep msg sig from parent
+				n.ReqSig = e.ReqSig
+			} // else forked on new request from UAC -> keep new msg sig
 		} else {
 			n.CSeq[0] = e.CSeq[0]
+			// forked entry either on request from UAS or reply from UAC
+			// -> in both cases keep msg sig from parent (which either
+			// contains the creating UAC request sig or is empty)
+			n.ReqSig = e.ReqSig
 		}
 		// leave ReqsNo and ReplsNo 0, they should count the reqs/repls
 		// received on this "forked" entry / branch
@@ -1336,7 +1354,8 @@ func PrintNCalls(w io.Writer, max int) {
 				" last method: %s:%s last status %3d "+
 				" msg trace: %q"+
 				" state trace: %q"+
-				"refcnt: %d expire: %ds\n",
+				" req sig: %s"+
+				" refcnt: %d expire: %ds\n",
 				n, e.Key.GetCallID(), e.Key.GetFromTag(),
 				e.Key.GetToTag(), e.Method, e.State, e.CSeq[0], e.CSeq[1],
 				e.ReplStatus[0], e.ReplStatus[1],
@@ -1346,6 +1365,7 @@ func PrintNCalls(w io.Writer, max int) {
 				e.lastMethod[0], e.lastMethod[1], e.lastReplStatus,
 				e.lastMsgs,
 				e.prevState,
+				e.ReqSig.String(),
 				e.refCnt, e.Timer.Expire.Sub(timestamp.Now())/time.Second)
 			n++
 			if n > max {
@@ -1431,6 +1451,7 @@ func PrintCallsFilter(w io.Writer, start, max int, op int, cid []byte, re *regex
 					" last method: %s:%s last status %3d"+
 					" msg trace: %q"+
 					" state trace: %q"+
+					" req_sig: %s"+
 					" refcnt: %d expire: %ds regcache: %p\n",
 					n, e.Key.GetCallID(), e.Key.GetFromTag(),
 					e.Key.GetToTag(), e.Method, e.State, e.CSeq[0], e.CSeq[1],
@@ -1441,6 +1462,7 @@ func PrintCallsFilter(w io.Writer, start, max int, op int, cid []byte, re *regex
 					e.lastMethod[0], e.lastMethod[1], e.lastReplStatus,
 					e.lastMsgs.String(),
 					e.prevState.String(),
+					e.ReqSig.String(),
 					e.refCnt, e.Timer.Expire.Sub(timestamp.Now())/time.Second,
 					e.regBinding)
 				if e.regBinding != nil {

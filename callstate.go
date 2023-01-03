@@ -966,7 +966,8 @@ type CallEntry struct {
 	EvFlags    EventFlags      // sent/generated events
 	Method     sipsp.SIPMethod // creating method
 	State      CallState
-	evHandler  HandleEvF // event handler function
+	ReqSig     sipsp.MsgSig // creating request msg sig
+	evHandler  HandleEvF    // event handler function
 
 	// used only for REGISTERS:
 	regBinding *RegEntry // pointer to cached registry binding
