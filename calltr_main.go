@@ -297,7 +297,7 @@ func forkCallEntry(e *CallEntry, m *sipsp.PSIPMsg, dir int, match CallMatchType,
 		/* only the callid matches => the from tag must be either updated
 		 	in-place or a new entry must be "forked".
 			Optimization: if the entry received a negative reply, and the
-			 neg reply is and auth failure, replace it
+			 neg reply is an auth failure, replace it
 			 (if there is enough space).
 			 This also helps in matching requests retransmitted after a
 			 challenge with a different from tag.
@@ -501,8 +501,10 @@ func forkCallEntry(e *CallEntry, m *sipsp.PSIPMsg, dir int, match CallMatchType,
 			//  1. re-trans of the original message
 			//  2. proxy serial forking (re-send orig. msg after neg.
 			//     reply but to a different destination)
+			//     (should be caught above)
 			//  3. new message (higher CSeq) sent in resp. to an auth.
 			//     failure or other? neg. reply
+			//     (failure/neg reply should be caught above)
 			//  4. new message matching old early dialog for which we missed
 			//     the final reply
 			// In all the cases it makes sense to "absorb" the message and
