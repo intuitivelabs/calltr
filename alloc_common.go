@@ -23,11 +23,13 @@ const (
 // const AllocCallsPerEntry = N
 
 type AllocStats struct {
-	TotalSize StatCounter
-	NewCalls  StatCounter
-	FreeCalls StatCounter
-	Failures  StatCounter
-	ZeroSize  StatCounter // zero size allocs
+	AllocCallsPerEntry uint // "constant", number of allocations for each entry
+	AllocRoundTo       uint // constant, alloc round-up size
+	TotalSize          StatCounter
+	NewCalls           StatCounter
+	FreeCalls          StatCounter
+	Failures           StatCounter
+	ZeroSize           StatCounter // zero size allocs
 	// variable buffer sizes
 	// (note that this keeps track only of the variable part and
 	// not of the fixed, which can be found from NewCalls*sizeof(struct))
@@ -36,8 +38,24 @@ type AllocStats struct {
 	PoolHits [MemPoolsNo]StatCounter
 	// buffer pools misses
 	PoolMiss [MemPoolsNo]StatCounter
+	Name     string
 }
 
 var CallEntryAllocStats AllocStats
 var RegEntryAllocStats AllocStats
 var EvRateEntryAllocStats AllocStats
+
+// initialises the AllocStats vars
+func init() {
+	CallEntryAllocStats.AllocCallsPerEntry = AllocCallsPerEntry
+	CallEntryAllocStats.AllocRoundTo = AllocRoundTo
+	CallEntryAllocStats.Name = AllocTypeName
+
+	RegEntryAllocStats.AllocCallsPerEntry = AllocCallsPerEntry
+	RegEntryAllocStats.AllocRoundTo = AllocRoundTo
+	RegEntryAllocStats.Name = AllocTypeName
+
+	EvRateEntryAllocStats.AllocCallsPerEntry = AllocCallsPerEntry
+	EvRateEntryAllocStats.AllocRoundTo = AllocRoundTo
+	EvRateEntryAllocStats.Name = AllocTypeName // FIXME
+}
