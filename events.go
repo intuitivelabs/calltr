@@ -284,10 +284,10 @@ func (ed *EventData) Reset() {
 	buf := ed.Buf
 	*ed = EventData{}
 	ed.Buf = buf
-	ed.sdpSoffs[0] = uint16(len(ed.Buf))
-	ed.sdpEoffs[0] = uint16(len(ed.Buf))
-	ed.sdpSoffs[1] = uint16(len(ed.Buf))
-	ed.sdpEoffs[1] = uint16(len(ed.Buf))
+	ed.sdpSoffs[0] = 0
+	ed.sdpEoffs[0] = 0
+	ed.sdpSoffs[1] = 0
+	ed.sdpEoffs[1] = 0
 	ed.SDP[0].Reset(false)
 	ed.SDP[1].Reset(false)
 	ed.SDP[0].buf = nil
