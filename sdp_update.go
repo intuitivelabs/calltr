@@ -57,12 +57,14 @@ func InitSDPsupport() bool {
 		ERR("failed to init sdp stats: %v\n", err)
 		return false
 	}
-	if !initAllocSDP(GetCfg().Mem.SDPtotalMem) {
-		ERR("sdp sessions alloc init failed for %d bytes\n",
-			GetCfg().Mem.SDPtotalMem)
-		return false
+	if GetCfg().SDP && (GetCfg().Mem.SDPtotalMem > 0) {
+		if !initAllocSDP(GetCfg().Mem.SDPtotalMem) {
+			ERR("sdp sessions alloc init failed for %d bytes\n",
+				GetCfg().Mem.SDPtotalMem)
+			return false
+		}
+		DBG(" SDP alloc init with: %d\n", GetCfg().Mem.SDPtotalMem)
 	}
-	DBG(" SDP alloc init with: %d\n", GetCfg().Mem.SDPtotalMem)
 	return true
 }
 
