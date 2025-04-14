@@ -10,5 +10,7 @@ require (
 	github.com/intuitivelabs/sipsp v1.1.5
 	github.com/intuitivelabs/slog v0.0.2
 	github.com/intuitivelabs/timestamp v0.0.3
+	github.com/intuitivelabs/unsafeconv v0.0.2
 	github.com/intuitivelabs/wtimer v0.0.2
+	github.com/pion/sdp/v3 v3.0.9
 )
