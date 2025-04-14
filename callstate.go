@@ -934,6 +934,15 @@ func (s *StateBackTrace) Add(cs CallState) {
 	s.N++
 }
 
+// Last return the most recent state saved and true
+// or CallStNone and false if no previous state is recorded
+func (s *StateBackTrace) Last() (CallState, bool) {
+	if s.N > 0 {
+		return s.PrevState[int(s.N-1)%len(s.PrevState)], true
+	}
+	return CallStNone, false
+}
+
 func (s *StateBackTrace) String() string {
 	var i uint
 	var str string
@@ -1046,6 +1055,12 @@ func (c *CallEntry) Unref() bool {
 		return true
 	}
 	return false
+}
+
+// lastState returns the last state and true if there is a last state
+// or CallStNone and false.
+func (c *CallEntry) lastState() (CallState, bool) {
+	return c.prevState.Last()
 }
 
 // match returns the "matching type" between the current call entry and
