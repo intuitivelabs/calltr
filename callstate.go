@@ -34,10 +34,11 @@ const (
 	MaxUASpace          = 64  // max sace for saving UA (from UAC or UAS)
 	DefaultUACSpace     = 64
 	DefaultUASSpace     = 48
-	MaxPAI1Space        = 160 // max space for saving 1st P-Asserted-Identity
-	DefaultPAI1Space    = 64  // if 1st PAI not known yet
-	MaxPAI2Space        = 96  // max space for saving 2nd P-Asserted-Identity
-	DefaultPAI2Space    = 32  // if 2nd PAI not known yet
+	MaxPAI1Space        = 160     // max space for saving 1st P-Asserted-Identity
+	DefaultPAI1Space    = 64      // if 1st PAI not known yet
+	MaxPAI2Space        = 96      // max space for saving 2nd P-Asserted-Identity
+	DefaultPAI2Space    = 32      // if 2nd PAI not known yet
+	MaxSDPSpace         = 2 * 512 // ? 2*1k TODO: keep only necessary
 	HashSize            = 65536
 )
 
@@ -984,6 +985,8 @@ type CallEntry struct {
 
 	// used only for REGISTERS:
 	regBinding *RegEntry // pointer to cached registry binding
+	// used to keep the current parsed SDP
+	sdp [2]*SDPsessInfo
 
 	FinReplTS      timestamp.TS // final call establisment reply (>= 200)
 	EarlyDlgTS     timestamp.TS // early dialog (18x)
@@ -1050,6 +1053,14 @@ func (c *CallEntry) Unref() bool {
 				unlockRegEntry(c.regBinding)
 			}
 			c.regBinding.Unref()
+		}
+		if c.sdp[0] != nil {
+			FreeSDPsessInfo(c.sdp[0])
+			c.sdp[0] = nil
+		}
+		if c.sdp[1] != nil {
+			FreeSDPsessInfo(c.sdp[1])
+			c.sdp[1] = nil
 		}
 		FreeCallEntry(c)
 		return true
