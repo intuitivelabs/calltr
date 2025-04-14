@@ -764,10 +764,11 @@ func addSlice(src []byte, dstP *sipsp.PField, dbuf *[]byte, offs *int, max int) 
 // record message type and direction
 // TODO: move it in a separate file and conditional compile
 // format: last bit (15) -> direction, 0 caller -callee or 1 (reverse)
-//              bit 14   -> type: 0 request, 1 reply
-//              bit 13-10 -> retransmission no. 0 == no retr, max 16)
-//              bits 0-9 -> reply status , if type == 1
-//              bit 0-8  -> request method no. if type == 0
+//
+//	bit 14   -> type: 0 request, 1 reply
+//	bit 13-10 -> retransmission no. 0 == no retr, max 16)
+//	bits 0-9 -> reply status , if type == 1
+//	bit 0-8  -> request method no. if type == 0
 type MsgRec uint16
 
 const (
@@ -833,12 +834,13 @@ type MsgBackTrace struct {
 	N    uint // number of message
 }
 
-//AddReq adds a request to the message trace.
+// AddReq adds a request to the message trace.
 // The parameteres are:
-//    method - the sip request method
-//    dir    - the request direction (UAC -> UAS or UAS -> UAC)
-//    isRetr - true if it's a retransmission of some previous request
-//    msgCnt - number of identical messages to add (at least 1)
+//
+//	method - the sip request method
+//	dir    - the request direction (UAC -> UAS or UAS -> UAC)
+//	isRetr - true if it's a retransmission of some previous request
+//	msgCnt - number of identical messages to add (at least 1)
 func (m *MsgBackTrace) AddReq(method sipsp.SIPMethod, dir int,
 	isRetr bool, msgCnt int) {
 	if msgCnt < 1 {
@@ -866,12 +868,13 @@ func (m *MsgBackTrace) AddReq(method sipsp.SIPMethod, dir int,
 	m.N++
 }
 
-//AddRepl adds a reply to the message trace.
+// AddRepl adds a reply to the message trace.
 // The parameteres are:
-//    status - the sip reply status code
-//    dir    - the request direction (UAC -> UAS or UAS -> UAC)
-//    isRetr - true if it's a retransmission of some previous reply
-//    msgCnt - number of identical messages to add (at least 1)
+//
+//	status - the sip reply status code
+//	dir    - the request direction (UAC -> UAS or UAS -> UAC)
+//	isRetr - true if it's a retransmission of some previous reply
+//	msgCnt - number of identical messages to add (at least 1)
 func (m *MsgBackTrace) AddRepl(status uint16, dir int,
 	isRetr bool, msgCnt int) {
 	if msgCnt < 1 {
@@ -951,8 +954,9 @@ func (s *StateBackTrace) String() string {
 
 // CallEntry holds dialog or call state information in a compact form.
 // WARNING: since a custom mem. allocator will be used in the future, do
-//          not use pointers to go allocated objects (or GC might delete
-//          them)
+//
+//	not use pointers to go allocated objects (or GC might delete
+//	them)
 type CallEntry struct {
 	next, prev *CallEntry
 	Key        CallKey
@@ -1024,7 +1028,7 @@ func (c *CallEntry) Unref() bool {
 		// sanity regBinding check
 		if c.regBinding != nil {
 			// NOTE: if refCnt is 0 then c.regBinding should be always nil
-			// otherwise c should be still ref'ed from the reg cache entry
+			// otherwise c would be still ref'ed from the reg cache entry
 			// and the refCnt would not be 0
 			BUG("CallEntry.Unref(): 0 refCnt but still linked "+
 				"from regBinding cache: %p <- %p [%v]\n",
