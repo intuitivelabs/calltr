@@ -106,23 +106,37 @@ func chgState(e *CallEntry, newState CallState, dir int) CallState {
 // fromtag).
 // See also updateStateRepl().
 // It returns the current, updated CallState, the corresponding timeout, the
-// timeout flags and an EventType.
+// timeout flags a sip related EventType and a SDP event.
 // The EventType is not checked for uniqueness (e.g. several call-start could
 // be generated one-after-another if several 2xx arrive)
 // TODO: look at dir when deciding how/what to update
 // unsafe, MUST be called w/ lock held or if no parallel access is possible
-func updateStateReq(e *CallEntry, m *sipsp.PSIPMsg, dir int) (CallState, TimeoutS, TimerUpdateF, EventType) {
+func updateStateReq(e *CallEntry, m *sipsp.PSIPMsg, dir int) (CallState, TimeoutS, TimerUpdateF, EventType, EventType) {
 	mmethod := m.FL.MethodNo
 	mcseq := m.PV.CSeq.CSeqNo
 	mhastotag := !m.PV.To.Tag.Empty()
 	prevState := e.State
 	newState := CallStNone
 	event := EvNone
+	sdpEvent := EvSDPNone
 	toFlags := FTimerUpdForce
-	if reqRetr(e, m, dir) ||
-		mmethod == sipsp.MPrack /* ignore PRACKs */ ||
-		mmethod == sipsp.MUpdate /* ignore UPDATEs */ {
+	if reqRetr(e, m, dir) {
 		// retransmission
+		goto retr
+	}
+	if mmethod == sipsp.MPrack /* ignore PRACKs */ ||
+		mmethod == sipsp.MUpdate /* ignore UPDATEs */ {
+		// ignore PRACKs and UPDATEs for call entry state updates
+		// but not for SDP
+		n, sdpEv := callEntryUpdateReqSDP(e, dir, m, getSDPidx(dir, m))
+		if n < 0 {
+			ERR("failed to update sdp session, code: %d (%s) for %q\n",
+				n, ErrorSDP(n), m.Body.Get(m.Buf))
+			sdpStats.cnts.Inc(sdpStats.updReqFail)
+		} else {
+			DBG("%d bytes used for sdp for call entry %p\n", n, e)
+			sdpEvent = sdpEv
+		}
 		goto retr
 	}
 	switch mmethod {
@@ -295,9 +309,26 @@ func updateStateReq(e *CallEntry, m *sipsp.PSIPMsg, dir int) (CallState, Timeout
 		}
 	}
 end:
+	// update state
+	//  SDP update state, before updating call entry state
+	// (SDP update might need the call entry state before the
+	//  current message)
+	// TODO: on CallStBye or CallStByeReplied and maybe on CallStCanceled
+	//       immediately clear/free the RTP Session (removing the streams
+	//       so that new can be added if fork or new call) ?
+	//        Alternative on event == EvCallEnd or EvCallAttempt
+	if n, sdpEv := callEntryUpdateReqSDP(e, dir, m, getSDPidx(dir, m)); n < 0 {
+		ERR("failed to update sdp session, code: %d (%s) sdpEv %s (%d)"+
+			" for %q\n",
+			n, ErrorSDP(n), sdpEv, sdpEv, m.Body.Get(m.Buf))
+		sdpStats.cnts.Inc(sdpStats.updReqFail)
+	} else {
+		DBG("%d bytes used for sdp for call entry %p on %s (%d)\n",
+			n, e, mmethod, mmethod)
+		sdpEvent = sdpEv
+	}
 	e.CSeq[dir] = mcseq
 	e.ReqsNo[dir]++
-	// update state
 	e.prevState.Add(e.State) // debugging
 	e.lastMethod[dir] = mmethod
 	e.lastMsgs.AddReq(mmethod, dir, false, 1)
@@ -313,13 +344,13 @@ end:
 	if event != EvNone {
 		e.evGen = EvGenReq
 	}
-	return newState, TimeoutS(newState.TimeoutS()), toFlags, event
+	return newState, TimeoutS(newState.TimeoutS()), toFlags, event, sdpEvent
 retr: // retransmission or PRACK
 	newState = prevState
 	toFlags = FTimerUpdGT // update timer only if not already greater...
 	e.ReqsRetrNo[dir]++
 	e.lastMsgs.AddReq(mmethod, dir, true, 1)
-	return prevState, TimeoutS(prevState.TimeoutS()), toFlags, EvNone
+	return prevState, TimeoutS(prevState.TimeoutS()), toFlags, EvNone, sdpEvent
 }
 
 // updateStateRepl() updates the call state in a forgiving maximum
@@ -334,15 +365,17 @@ retr: // retransmission or PRACK
 // fromtag).
 // See also updateStateReq().
 // It returns the current, updated CallState, the corresponding timeout, the
-// timeout flags and an EventType.
+// timeout flags, a sip related EventType and a SDP event
 // The EventType is not checked for uniqueness (e.g. several call-start could
 // be generated one-after-another if several 2xx arrive)
 // TODO: event support for REGISTER (full with deletions and expires) and
-//      SUBSCRIBE/NOTIFY (requires extra parsing)
+//
+//	SUBSCRIBE/NOTIFY (requires extra parsing)
+//
 // TODO: REG timeout = Max Expires, or if bad value 3600 (rfc3261) ??
 // TODO: look at dir when deciding how/what to update
 // unsafe, MUST be called w/ lock held or if no parallel access is possible
-func updateStateRepl(e *CallEntry, m *sipsp.PSIPMsg, dir int) (CallState, TimeoutS, TimerUpdateF, EventType) {
+func updateStateRepl(e *CallEntry, m *sipsp.PSIPMsg, dir int) (CallState, TimeoutS, TimerUpdateF, EventType, EventType) {
 	var to TimeoutS
 	toFlags := FTimerUpdForce
 	mstatus := m.FL.Status
@@ -352,16 +385,33 @@ func updateStateRepl(e *CallEntry, m *sipsp.PSIPMsg, dir int) (CallState, Timeou
 	prevState := e.State
 	newState := CallStNone
 	event := EvNone
+	sdpEvent := EvSDPNone
 	// check for retransmissions
 	// in the forking case, simultaneous 2xx on multiple branches will
 	// have different To tags => we could ignore them here (but it's
 	// easier to handle them too in case of forked call-state)
-	if replRetr(e, m, dir) ||
-		mmethod == sipsp.MPrack /* ignore PRACKs */ ||
-		mmethod == sipsp.MUpdate /* ignore UPDATEs */ ||
-		mmethod == sipsp.MAck /* should never happen, but...*/ {
+	if replRetr(e, m, dir) {
 		goto retr // retransmission
 	}
+	if mmethod == sipsp.MPrack /* ignore PRACKs */ ||
+		mmethod == sipsp.MUpdate /* ignore UPDATEs */ ||
+		mmethod == sipsp.MAck /* should never happen, but...*/ {
+		// ignore PRACK, UPDATE & ACK for call entry state updates, but not
+		// for SDP
+		//  SDP update state
+		n, sdpEv := callEntryUpdateReplySDP(e, dir, m, getSDPidx(dir, m))
+		if n < 0 {
+			ERR("failed to update sdp on reply, code: %d (%s) sdpEv %s (%d) "+
+				"for %q\n",
+				n, ErrorSDP(n), sdpEv, sdpEv, m.Body.Get(m.Buf))
+			sdpStats.cnts.Inc(sdpStats.updReplFail)
+		} else {
+			DBG("%d bytes used for sdp for call entry on reply %p\n", n, e)
+			sdpEvent = sdpEv
+		}
+		goto retr // retransmission
+	}
+
 	switch mmethod {
 	case sipsp.MCancel:
 		switch prevState {
@@ -572,6 +622,22 @@ func updateStateRepl(e *CallEntry, m *sipsp.PSIPMsg, dir int) (CallState, Timeou
 		}
 	}
 	//end:
+	//  SDP update state, before updating call entry state
+	// (SDP update might need the call entry state before the
+	//  current message)
+	// TODO: on CallStBye or CallStByeReplied and maybe on CallStCanceled
+	//       immediately clear/free the RTP Session (removing the streams
+	//       so that new can be added if fork or new call) ?
+	//        Alternative on event == EvCallEnd or EvCallAttempt
+	if n, sdpE := callEntryUpdateReplySDP(e, dir, m, getSDPidx(dir, m)); n < 0 {
+		ERR("failed to update sdp on reply, code: %d (%s) for %q\n",
+			n, ErrorSDP(n), m.Body.Get(m.Buf))
+		sdpStats.cnts.Inc(sdpStats.updReplFail)
+	} else {
+		DBG("%d bytes used for sdp for call entry on reply %d (%p)\n",
+			n, mstatus, e)
+		sdpEvent = sdpE
+	}
 	e.ReplCSeq[dir] = mcseq
 	//? only if newState =! prevState ? (not ignored?)
 	if mmethod == e.Method {
@@ -605,18 +671,19 @@ func updateStateRepl(e *CallEntry, m *sipsp.PSIPMsg, dir int) (CallState, Timeou
 	if to == 0 {
 		to = TimeoutS(newState.TimeoutS())
 	}
-	return newState, to, toFlags, event
+	return newState, to, toFlags, event, sdpEvent
 retr: // retransmission, ignore
 	newState = prevState
 	e.ReplsRetrNo[dir]++
 	e.lastMsgs.AddRepl(mstatus, dir, true, 1)
 	toFlags = FTimerUpdGT // update timer only if not already greater...
 	to = TimeoutS(prevState.TimeoutS())
-	return prevState, to, toFlags, EvNone
+	return prevState, to, toFlags, EvNone, sdpEvent
 }
 
 // unsafe, MUST be called w/ lock held or if no parallel access is possible
-func updateState(e *CallEntry, m *sipsp.PSIPMsg, dir int) (CallState, TimeoutS, TimerUpdateF, EventType) {
+// It returns 2 event, one sip call related and one sdp event.
+func updateState(e *CallEntry, m *sipsp.PSIPMsg, dir int) (CallState, TimeoutS, TimerUpdateF, EventType, EventType) {
 	if m.FL.Request() {
 		return updateStateReq(e, m, dir)
 	}
@@ -806,7 +873,8 @@ func msgMatchContact(m *sipsp.PSIPMsg, c []byte) (bool, bool, uint32) {
 }
 
 // returns the event type, new timeout or 0 (meaning the caller should use the
-//  default) and timeout update flags (force update or extend-only timeout).
+//
+//	default) and timeout update flags (force update or extend-only timeout).
 func handleRegRepl(e *CallEntry, m *sipsp.PSIPMsg) (event EventType, to TimeoutS, toFlags TimerUpdateF) {
 	toFlags = FTimerUpdForce
 	event = EvRegNew

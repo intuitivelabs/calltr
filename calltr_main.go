@@ -10,6 +10,7 @@ import (
 	"bytes"
 	"fmt"
 	"io"
+	"net"
 	"regexp"
 	"sync/atomic"
 	"time"
@@ -29,12 +30,15 @@ type MemConfig struct {
 	MaxCallEntriesMem uint64 // maximum memory allowed for call state
 	MaxRegEntries     uint64 // maximum registration bindings
 	MaxRegEntriesMem  uint64 // maximum memory for registration bindings
+	SDPmaxEntryMem    uint64 // maximum memory for each  session (SDP)
+	SDPtotalMem       uint64 // total memory used for all the kept SDP info
 }
 
 type Config struct {
 	RegDelta          uint32 // registration expire delta in s, added to expire timeouts
 	RegDelDelay       int32  // delay in generating EvRegDel in s
 	ContactIgnorePort bool   // ignore port when comparing contacts (but not in AORs)
+	SDP               bool   // keep track of SDP per call
 	Mem               MemConfig
 	Dbg               DbgFlags
 	// per state timeout in s, used at runtime
@@ -52,6 +56,8 @@ var DefaultConfig = Config{
 		MaxCallEntriesMem: 0,
 		MaxRegEntries:     0,
 		MaxRegEntriesMem:  0,
+		SDPmaxEntryMem:    0,
+		SDPtotalMem:       0,
 	},
 	Dbg:           DbgFAllocs,
 	stateTimeoutS: defaultStateTimeoutS,
@@ -234,6 +240,8 @@ func newCallEntry(hashNo, cseq uint32, m *sipsp.PSIPMsg,
 			ERR("msg sig failed with err %d (%s)\n", err, err)
 		}
 	}
+	// SDP updates are not done here, but via updateState() or
+	//  addCallEntryUnsafe() that will be called with the new callentry
 	e.evHandler = evH
 	e.CreatedTS = timestamp.Now()
 	e.EndPoint = n
@@ -267,6 +275,13 @@ func forkCallEntry(e *CallEntry, m *sipsp.PSIPMsg, dir int, match CallMatchType,
 		newToTag = m.PV.From.Tag
 		newFromTag = m.PV.To.Tag
 	}
+	const (
+		SDPclearAll    = -1
+		SDPclearCaller = 0
+		SDPclearCallee = 1
+		SDPkeepAll     = 2
+	)
+	sdpAction := SDPkeepAll
 	switch match {
 	case CallCallIDMatch:
 		/* only the callid matches => the from tag must be either updated
@@ -281,6 +296,7 @@ func forkCallEntry(e *CallEntry, m *sipsp.PSIPMsg, dir int, match CallMatchType,
 			  original CSeq (so no retr. checks possible)
 			Else: create a new entry */
 		// TODO: do it for all neg replies or only for auth failure?
+		sdpAction = SDPclearAll
 		totagSpace := int(newToTag.Len)
 		if totagSpace == 0 {
 			totagSpace = DefaultToTagLen
@@ -289,6 +305,9 @@ func forkCallEntry(e *CallEntry, m *sipsp.PSIPMsg, dir int, match CallMatchType,
 			e.Key.TagSpace(int(newFromTag.Len), totagSpace) &&
 			authFailure(e.ReplStatus[0]) {
 			// enough space to update in-place
+
+			// handle sdp: clear it
+			clearSDP(e, -1) // both sides
 
 			if !e.Key.SetFTag(newFromTag.Get(m.Buf), totagSpace) {
 				BUG("forkCallEntry: unexpected failure\n")
@@ -341,6 +360,8 @@ func forkCallEntry(e *CallEntry, m *sipsp.PSIPMsg, dir int, match CallMatchType,
 		if e.Key.ToTag.Len == 0 {
 			// update a missing to tag
 			// e.g. missed 200, received NOTIFY from the other side...
+			// keep SDP as is (no "fork"), both sides
+			sdpAction = SDPkeepAll
 			if e.Key.SetToTag(newToTag.Get(m.Buf)) {
 				// successfully update
 				e.Flags |= CFReused
@@ -351,6 +372,7 @@ func forkCallEntry(e *CallEntry, m *sipsp.PSIPMsg, dir int, match CallMatchType,
 					newToTag.Get(m.Buf))
 			}
 			// update failed => not enough space => fallback to fork call entry
+			// TODO: clone SDP. both sides, but remove original
 
 			// TODO: else if REGISTER call entry and m is reply and
 			//     m.CSeq > e.CSeq[dir] && enough space && ?is2xx(m)?
@@ -366,12 +388,27 @@ func forkCallEntry(e *CallEntry, m *sipsp.PSIPMsg, dir int, match CallMatchType,
 			if totagSpace == 0 {
 				totagSpace = DefaultToTagLen
 			}
+			// mark SDP offer for keeping, if fork on reply from
+			// callee and offer made by caller
+			if !m.Request() && dir == 0 && e.Method == m.Method() &&
+				e.sdp[0] != nil && !e.sdp[0].IsEmpty() &&
+				e.sdp[0].IsOffer() {
+				sdpAction = SDPclearCallee
+			} else {
+				// if request with different to-tag
+				//   -> strange it should have its own sdp
+				// or reply to callee with a different tag
+				//   -> strange -> missed a request?
+				// or reply to caller with different method
+				//  (to some unseen UPDATE? or PRACK)
+				// or sdp[caller] is an answer (offer from callee)
+				sdpAction = SDPclearAll
+			}
 			// if final negative reply, try to re-use the call-entry
 			// This catches serial forking and retry after auth. failure.
 			// Both messages with and without to-tag are considered,
 			// in case we missed some intermediate reply.
 			if (e.State == CallStNegReply || e.State == CallStNonInvNegReply) &&
-				e.Key.TagSpace(int(e.Key.FromTag.Len), totagSpace) &&
 				e.Method == m.Method() /*&& authFailure(e.ReplStatus[dir]*/ {
 
 				// check for possible old retransmissions
@@ -384,13 +421,30 @@ func forkCallEntry(e *CallEntry, m *sipsp.PSIPMsg, dir int, match CallMatchType,
 				} else {
 					// update to-tag, if request or not 100
 					if m.Request() || m.FL.Status > 100 {
-						if !e.Key.SetToTag(newToTag.Get(m.Buf)) {
-							BUG("forkCallEntry: partial match to\n")
-							return nil
+						if e.Key.TagSpace(int(e.Key.FromTag.Len), totagSpace) {
+							if !e.Key.SetToTag(newToTag.Get(m.Buf)) {
+								BUG("forkCallEntry: partial match to\n")
+								return nil
+							}
+							switch sdpAction {
+							case SDPclearAll:
+								clearSDP(e, -1) // clear both sides
+							case SDPclearCallee:
+								clearSDP(e, 1) // clear only callee SDP
+								// clear confirmed flag & set pending
+								e.sdp[0].status.flags.Clear(fSDPconfirmed)
+								e.sdp[0].status.flags.Set(fSDPpending)
+							default:
+								BUG("unexpected sdpAction %d\n", sdpAction)
+							}
+							e.Flags |= CFReused
+							return e
 						}
+					} else {
+						// no update, 100 reply
+						return e
 					}
-					e.Flags |= CFReused
-					return e
+					// fallback to new entry (in-place fork/reuse not possible)
 				}
 			}
 			// REGISTER in-place update HACK:
@@ -457,6 +511,7 @@ func forkCallEntry(e *CallEntry, m *sipsp.PSIPMsg, dir int, match CallMatchType,
 			// (can't be in an initial because in that case it won't have a
 			//  a totag and it would have been a full-match).
 			if newToTag.Len == 0 {
+				// keep SDP (probably some retr)
 				return e
 			}
 		}
@@ -473,13 +528,79 @@ func forkCallEntry(e *CallEntry, m *sipsp.PSIPMsg, dir int, match CallMatchType,
 			if !m.Request() {
 				// forked entry on reply from UAS, keep msg sig from parent
 				n.ReqSig = e.ReqSig
-			} // else forked on new request from UAC -> keep new msg sig
-		} else {
+			} //else forked on new request from UAC -> keep new msg sig
+		} else { // dir == 1 : request from UAS or reply from UAC
 			n.CSeq[0] = e.CSeq[0]
 			// forked entry either on request from UAS or reply from UAC
 			// -> in both cases keep msg sig from parent (which either
 			// contains the creating UAC request sig or is empty)
 			n.ReqSig = e.ReqSig
+		}
+		// handle sdpAction
+		switch sdpAction {
+		case SDPkeepAll:
+			if e.sdp[0] != nil {
+				n.sdp[0] = CloneSDPsessInfo(e.sdp[0])
+				if n.sdp[0] == nil {
+					sdpStats.cnts.Inc(sdpStats.cloneFail)
+					ERR("failed to clone sdp caller offer: mem alloc. \n")
+					break
+				}
+				// TODO: handle RTP sessions -> clone/move them
+			}
+			if e.sdp[1] != nil {
+				n.sdp[1] = CloneSDPsessInfo(e.sdp[1])
+				if n.sdp[1] == nil {
+					sdpStats.cnts.Inc(sdpStats.cloneFail)
+					ERR("failed to clone sdp caller offer: mem alloc. \n")
+					break
+				}
+				// TODO: handle RTP sessions -> clone/move them
+			}
+		case SDPclearCallee:
+			if e.sdp[0] != nil {
+				n.sdp[0] = CloneSDPsessInfo(e.sdp[0])
+				if n.sdp[0] == nil {
+					sdpStats.cnts.Inc(sdpStats.cloneFail)
+					ERR("failed to clone sdp caller offer: mem alloc. \n")
+				} else {
+					sdpStats.cnts.Inc(sdpStats.cloned)
+					n.sdp[0].status.flags.Clear(fSDPconfirmed)
+					n.sdp[0].status.flags.Set(fSDPpending)
+					// handle RTP sessions -> do nothing
+					// (the new entry had the fSDPconfirmed flag cleared
+					//   and we add RTP sessions on confirmed SDP and
+					//  n.rtpSession is not set)
+					// TODO: clear e RTP sessions ?
+				}
+			}
+			n.sdp[1] = nil
+		case SDPclearCaller:
+			// should not be used for the time being
+			BUG("unexpected sdpAction %d\n", sdpAction)
+			n.sdp[0] = nil
+			if e.sdp[1] != nil {
+				n.sdp[1] = CloneSDPsessInfo(e.sdp[1])
+				if n.sdp[1] == nil {
+					sdpStats.cnts.Inc(sdpStats.cloneFail)
+					ERR("failed to clone sdp callee offer: mem alloc. \n")
+				} else {
+					sdpStats.cnts.Inc(sdpStats.cloned)
+					n.sdp[1].status.flags.Clear(fSDPconfirmed) // ?
+					n.sdp[1].status.flags.Set(fSDPpending)     // ?
+					// handle RTP sessions -> do nothing?
+					// (the new entry had the fSDPconfirmed flag cleared
+					//   and we add RTP sessions on confirmed SDP and
+					//    n.rtpSession is not set)
+				}
+			}
+		case SDPclearAll:
+			n.sdp[0] = nil
+			n.sdp[1] = nil
+			// handle RTP sessions -> nothing to do (no sdp) and n has no
+			// RTP session attached
+		default:
+			BUG("unknown sdpAction %d\n", sdpAction)
 		}
 		// leave ReqsNo and ReplsNo 0, they should count the reqs/repls
 		// received on this "forked" entry / branch
@@ -516,17 +637,19 @@ func forkCallEntry(e *CallEntry, m *sipsp.PSIPMsg, dir int, match CallMatchType,
 // addCallEntryUnsafe adds an already initialized call entry to the tracked
 // calls: set refcount, add to the hash table, update state, start timer.
 // WARNING: the proper hash lock must be already held.
-// It returns true on success and false on failure.
+// It returns true on success and false on failure and 2 events one for
+// sip call related and one sdp event.
 // If it returns false, e might be no longer valid (if not referenced before).
-func addCallEntryUnsafe(e *CallEntry, m *sipsp.PSIPMsg, dir int) (bool, EventType) {
+func addCallEntryUnsafe(e *CallEntry, m *sipsp.PSIPMsg,
+	dir int) (bool, EventType, EventType) {
 	maxEntries := GetCfg().Mem.MaxCallEntries
 	if cstHash.entries.Inc(1) > maxEntries && maxEntries > 0 {
 		// hash max entries limit exceeded => fail
 		cstHash.entries.Dec(1)
 		cstHash.cnts.grp.Inc(cstHash.cnts.hFailLimEx)
-		return false, EvNone
+		return false, EvNone, EvSDPNone
 	}
-	_, to, _, ev := updateState(e, m, dir)
+	_, to, _, ev, sdpEv := updateState(e, m, dir)
 	e.Ref() // for the hash
 	cstHash.HTable[e.hashNo].Insert(e)
 	cstHash.HTable[e.hashNo].IncStats()
@@ -536,22 +659,25 @@ func addCallEntryUnsafe(e *CallEntry, m *sipsp.PSIPMsg, dir int) (bool, EventTyp
 		cstHash.HTable[e.hashNo].DecStats()
 		cstHash.entries.Dec(1)
 		e.Unref()
-		return false, ev
+		return false, ev, sdpEv
 	}
 	cstHash.cnts.grp.Inc(cstHash.cnts.hActive)
 	// no ref for the timer
-	return true, ev
+	return true, ev, sdpEv
 }
 
 // unlinkCallEntryUnsafe removes a CallEntry from the tracked calls.
-// It removes it both from the CallEntry hash and the corresp. RegCache
-// entry (if present). If unref is false it will still keep a ref. to
+// It removes it from the CallEntry hash, the corresp. RegCache
+// entry (if present) and it also removes all the RTP Streams
+// (via the RTP Sessions).
+// If unref is false it will still keep a ref. to
 // the CallEntry.
 // It returns true if the entry was removed from the hash, false if not
 // (already removed)
 // WARNING: the proper hash lock must be already held.
 func unlinkCallEntryUnsafe(e *CallEntry, unref bool) bool {
 	re := e.regBinding
+	rtpSession := e.rtpSession
 	unlinked := false
 	if !cstHash.HTable[e.hashNo].Detached(e) {
 		cstHash.HTable[e.hashNo].Rm(e)
@@ -599,10 +725,13 @@ func unlinkCallEntryUnsafe(e *CallEntry, unref bool) bool {
 // Depending on flags it will update the call state based on msg, create
 // new call entries if needed a.s.o.
 // It returns the matched call entry (if any pre-existing one matches),
-//  the match type, the match direction and an event type.
-// It will also fill evd (if not nil) with event data (so that it can
-// be used outside a lock). The EventData structure must be initialised
-// by the caller.
+//
+//		the match type, the match direction, an event type for the sip signaling
+//	 and a separate sdp event.
+//
+// It will also fill evd (if not nil) with signaling related event data and
+// sdpEvd woth sdp event data  (so that they can be used outside a lock).
+// The EventData structures must be initialised by the caller.
 // WARNING: the returned call entry is referenced. Alway Unref() it after
 // use or memory leaks will happen.
 // Typical usage examples:
@@ -616,12 +745,13 @@ func unlinkCallEntryUnsafe(e *CallEntry, unref bool) bool {
 // * update exiting entries, no forking and no new
 // calle, match, dir = ProcessMsg(sipmsg, CallStProcessUpdate CallStNoAlloc)
 // calle.Unref()
-//
 func ProcessMsg(m *sipsp.PSIPMsg, ni [2]NetInfo, f HandleEvF, evd *EventData,
-	flags CallStProcessFlags) (*CallEntry, CallMatchType, int, EventType) {
+	sdpEvd *EventData, flags CallStProcessFlags) (*CallEntry, CallMatchType,
+	int, EventType, EventType) {
 	var to TimeoutS
 	var toF TimerUpdateF
 	ev := EvNone
+	sdpEv := EvSDPNone
 	if !(m.Parsed() &&
 		m.HL.PFlags.AllSet(sipsp.HdrFrom, sipsp.HdrTo,
 			sipsp.HdrCallID, sipsp.HdrCSeq)) {
@@ -630,7 +760,7 @@ func ProcessMsg(m *sipsp.PSIPMsg, ni [2]NetInfo, f HandleEvF, evd *EventData,
 				"message not fully parsed(%v) or missing headers (%0x)\n",
 				m.Parsed(), m.HL.PFlags)
 		}
-		return nil, CallErrMatch, 0, ev
+		return nil, CallErrMatch, 0, ev, sdpEv
 	}
 	hashNo := cstHash.Hash(m.Buf,
 		int(m.PV.Callid.CallID.Offs), int(m.PV.Callid.CallID.Len))
@@ -665,13 +795,13 @@ func ProcessMsg(m *sipsp.PSIPMsg, ni [2]NetInfo, f HandleEvF, evd *EventData,
 			}
 			e.Ref()
 			var ok bool
-			ok, ev = addCallEntryUnsafe(e, m, 0)
+			ok, ev, sdpEv = addCallEntryUnsafe(e, m, 0)
 			if !ok {
-				e.Unref()
-				e = nil
 				if DBGon() {
 					DBG("ProcessMsg: addCallEntryUnsafe() failed on NoMatch\n")
 				}
+				e.Unref()
+				e = nil
 				goto errorLocked
 			}
 			// we return the newly created call state, even if
@@ -711,7 +841,7 @@ func ProcessMsg(m *sipsp.PSIPMsg, ni [2]NetInfo, f HandleEvF, evd *EventData,
 				// them in forked or re-used REGISTER entries (which are
 				// caused by REGISTERs with different from or to-tag)
 				e.EvFlags &= ^EvRegMaskF
-				_, to, toF, ev = updateState(e, m, dir)
+				_, to, toF, ev, sdpEv = updateState(e, m, dir)
 				csTimerUpdateTimeoutUnsafe(e,
 					time.Duration(to)*time.Second, toF)
 			default:
@@ -719,7 +849,7 @@ func ProcessMsg(m *sipsp.PSIPMsg, ni [2]NetInfo, f HandleEvF, evd *EventData,
 				e = n
 				n.Ref()
 				var ok bool
-				ok, ev = addCallEntryUnsafe(n, m, dir)
+				ok, ev, sdpEv = addCallEntryUnsafe(n, m, dir)
 				if !ok {
 					n.Unref()
 					if DBGon() {
@@ -736,7 +866,7 @@ func ProcessMsg(m *sipsp.PSIPMsg, ni [2]NetInfo, f HandleEvF, evd *EventData,
 	case CallFullMatch:
 		e.Ref()
 		if flags&CallStProcessUpdate != 0 {
-			_, to, toF, ev = updateState(e, m, dir)
+			_, to, toF, ev, sdpEv = updateState(e, m, dir)
 			csTimerUpdateTimeoutUnsafe(e,
 				time.Duration(to)*time.Second, toF)
 		}
@@ -794,41 +924,87 @@ endLocked:
 		// event not seen before, report...
 		evd.Fill(ev, e)
 	}
+	if sdpEv != EvSDPNone && sdpEvd != nil {
+		if sdpEv.IsSDP() {
+			sdpEvd.Fill(sdpEv, e)
+		} else {
+			BUG("non SDP event %d\n", sdpEv)
+		}
+	}
 	cstHash.HTable[hashNo].Unlock()
-	return e, match, dir, ev
+	return e, match, dir, ev, sdpEv
 errorLocked:
 	cstHash.HTable[hashNo].Unlock()
 	if DBGon() {
 		DBG("ProcessMsg: returning CallErrMatch\n")
+		if sdpEv != EvSDPNone {
+			WARN("sdpEv is %s (%d) but forced error ret\n", sdpEv, sdpEv)
+		}
 	}
-	return nil, CallErrMatch, 0, EvNone
+	return nil, CallErrMatch, 0, EvNone, EvSDPNone
 }
 
 func Track(m *sipsp.PSIPMsg, n [2]NetInfo, f HandleEvF) bool {
 	var evd *EventData
-	if f != nil { // TODO: obsolete
+	var sdpEvd *EventData
+	if f != nil { // TODO: callbacks via f param are obsolete (slow)
+		// obsolete: cEvHandler registered vith RegisterCevHandler should
+		// be used instead (faster)
 		// TODO: most likely on the heap (due to f(evd)) => sync.pool
 		var buf = make([]byte, EventDataMaxBuf())
 		evd = &EventData{}
 		evd.Init(buf)
+		var buf2 = make([]byte, EventDataMaxBuf())
+		sdpEvd = &EventData{}
+		sdpEvd.Init(buf2)
 	}
 
-	e, match, _, ev :=
-		ProcessMsg(m, n, f, evd, CallStProcessUpdate|CallStProcessNew)
+	e, match, _, ev, sdpEv :=
+		ProcessMsg(m, n, f, evd, sdpEvd, CallStProcessUpdate|CallStProcessNew)
 	if e != nil {
-		if match != CallErrMatch && ev != EvNone {
-			if f != nil && evd != nil { // TODO: obsolete
-				f(evd)
+		if match != CallErrMatch {
+			if f != nil { // obsolete, cEvHandler preffered, see above
+				if ev != EvNone && evd != nil {
+					f(evd)
+				}
+				if sdpEv != EvSDPNone && sdpEvd != nil {
+					f(sdpEvd)
+				}
 			}
 			if cEvHandler != nil {
-				// e.EndPoint[] is never changed after creation, so it
-				// can be safely copied without locking (cannot change)
-				src := e.EndPoint[0]
-				dst := e.EndPoint[1]
-				cEvHandler(ev, e, src, dst)
+				if sdpEv != EvSDPNone {
+					DBG("XXX: sdpEv got %s (%d)\n", sdpEv, sdpEv)
+				}
+				if ev != EvNone || sdpEv != EvSDPNone {
+					// e.EndPoint[] is never changed after creation, so it
+					// can be safely copied without locking (cannot change)
+					src := e.EndPoint[0]
+					dst := e.EndPoint[1]
+					if ev != EvNone {
+						cEvHandler(ev, e, src, dst)
+					}
+					if sdpEv != EvSDPNone {
+						cEvHandler(sdpEv, e, src, dst)
+						DBG("XXX: ev handler for sdpEv %s (%d)\n", sdpEv, sdpEv)
+					}
+				}
+			}
+		} else { // DBG: TODO remove
+			if sdpEv != EvSDPNone {
+				WARN("XXX: sdpEv event not empty bug ignored: %s (%d) match %d\n", sdpEv, sdpEv, match)
+			}
+			if ev != EvNone {
+				WARN("XXX: ev event not empty bug ignored: %s (%d) match %d\n", ev, ev, match)
 			}
 		}
 		e.Unref()
+	} else { // DBG: TODO remove
+		if sdpEv != EvSDPNone {
+			WARN("XXX: sdpEv event not empty bug ignored e == nil: %s (%d) match %d\n", sdpEv, sdpEv, match)
+		}
+		if ev != EvNone {
+			WARN("XXX: ev event not empty bug ignored e == nil: %s (%d) match %d\n", ev, ev, match)
+		}
 	}
 	return match != CallErrMatch
 }
@@ -1367,6 +1543,16 @@ func PrintNCalls(w io.Writer, max int) {
 				e.prevState,
 				e.ReqSig.String(),
 				e.refCnt, e.Timer.Expire.Sub(timestamp.Now())/time.Second)
+			if GetCfg().SDP {
+				if e.sdp[0] != nil {
+					fmt.Fprintf(w, "            sdp caller: %s\n",
+						e.sdp[0].String())
+				}
+				if e.sdp[1] != nil {
+					fmt.Fprintf(w, "            sdp callee: %s\n",
+						e.sdp[1].String())
+				}
+			}
 			n++
 			if n > max {
 				lst.Unlock()
@@ -1472,6 +1658,16 @@ func PrintCallsFilter(w io.Writer, start, max int, op int, cid []byte, re *regex
 						e.regBinding.Contact.Get(e.regBinding.buf),
 						e.regBinding.refCnt)
 					unlockRegEntry(e.regBinding)
+				}
+				if GetCfg().SDP {
+					if e.sdp[0] != nil {
+						fmt.Fprintf(w, "            sdp caller: %s\n",
+							e.sdp[0].String())
+					}
+					if e.sdp[1] != nil {
+						fmt.Fprintf(w, "            sdp callee: %s\n",
+							e.sdp[1].String())
+					}
 				}
 				printed++
 			}

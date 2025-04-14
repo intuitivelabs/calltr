@@ -34,7 +34,15 @@ const (
 	EvOtherOk      // same as above, success (e.g OPTIONS out of call)
 	EvParseErr
 	EvNonSIPprobe // non sip probe
+
+	EvSDPupdate // sdp update
 	EvBad
+)
+
+const (
+	EvSDPNone    = EvNone
+	EvSDPfirstEv = EvSDPupdate // first SDP event
+	EvSDPlastEv  = EvSDPupdate // last SDP event
 )
 
 var evTypeName = [EvBad + 1]string{
@@ -54,6 +62,7 @@ var evTypeName = [EvBad + 1]string{
 	EvOtherOk:      "other-ok",
 	EvParseErr:     "parse-error",
 	EvNonSIPprobe:  "msg-probe",
+	EvSDPupdate:    "sdp-update",
 	EvBad:          "invalid",
 }
 
@@ -64,6 +73,12 @@ func (e EventType) String() string {
 	return evTypeName[int(e)]
 }
 
+func (e EventType) IsSDP() bool {
+	if e == EvSDPNone || (e >= EvSDPfirstEv && e <= EvSDPlastEv) {
+		return true
+	}
+	return false
+}
 
 // EventFlags holds a mask of generated sip related events.
 type EventFlags uint32
@@ -85,6 +100,8 @@ const (
 	EvOtherOkF      EventFlags = (EventFlags)(1) << EvOtherOk
 	EvParseErrF     EventFlags = (EventFlags)(1) << EvParseErr
 	EvNonSIPprobeF  EventFlags = (EventFlags)(1) << EvNonSIPprobe
+	// SDP events
+	EvSDPupdateF EventFlags = (EventFlags)(1) << EvSDPupdate
 
 	EvRegMaskF EventFlags = EvRegNewF | EvRegDelF | EvRegExpiredF
 )
@@ -172,6 +189,9 @@ func EventDataMaxBuf() int {
 			s += m
 		}
 	}
+	if GetCfg().SDP {
+		s += MaxSDPSpace
+	}
 	return s
 }
 
@@ -251,6 +271,10 @@ type EventData struct {
 	ToTag      sipsp.PField
 	EvGen      EvGenPos // where was the event generated
 
+	SDP      [2]SDPsessInfo // whole SDP (TODO: reduce to needed only)
+	sdpSoffs [2]uint16      // start offset for SDP in Buf
+	sdpEoffs [2]uint16      // end offset for SDP in Buf
+
 	Valid int    // no of valid, non truncated PFields
 	Used  int    // how much of the buffer is used / current offset
 	Buf   []byte // buffer where all the content is saved
@@ -260,6 +284,14 @@ func (ed *EventData) Reset() {
 	buf := ed.Buf
 	*ed = EventData{}
 	ed.Buf = buf
+	ed.sdpSoffs[0] = uint16(len(ed.Buf))
+	ed.sdpEoffs[0] = uint16(len(ed.Buf))
+	ed.sdpSoffs[1] = uint16(len(ed.Buf))
+	ed.sdpEoffs[1] = uint16(len(ed.Buf))
+	ed.SDP[0].Reset(false)
+	ed.SDP[1].Reset(false)
+	ed.SDP[0].buf = nil
+	ed.SDP[1].buf = nil
 }
 
 func (ed *EventData) Init(buf []byte) {
@@ -276,6 +308,8 @@ func (ed *EventData) Copy(src *EventData) bool {
 	buf := ed.Buf
 	*ed = *src
 	ed.Buf = buf
+	ed.SDP[0].buf = ed.Buf[ed.sdpSoffs[0]:ed.sdpEoffs[0]]
+	ed.SDP[1].buf = ed.Buf[ed.sdpSoffs[1]:ed.sdpEoffs[1]]
 	copy(ed.Buf, src.Buf[:src.Used])
 	return true
 }
@@ -410,6 +444,33 @@ func (d *EventData) Fill(ev EventType, e *CallEntry) int {
 		d.Truncated = true
 		return d.Valid
 	}
+
+	// SDP
+	if ev.IsSDP() {
+		var ok1, ok2 bool
+		d.sdpSoffs[0] = uint16(d.Used)
+		d.SDP[0].buf = d.Buf[d.Used:]
+		n, ok1 = d.SDP[0].Copy(e.sdp[0], -1)
+		XDBG("ev SDP Copy 0: %d %v from %d crt. trunc %v  crt. used %d\n",
+			n, ok1, len(d.Buf)-int(d.Used), d.Truncated, d.Used)
+		if n > 0 {
+			d.Used += n
+		}
+		d.sdpEoffs[0] = uint16(d.Used)
+
+		d.SDP[1].buf = d.Buf[d.Used:]
+		d.sdpSoffs[1] = uint16(d.Used)
+		n, ok2 = d.SDP[1].Copy(e.sdp[1], -1)
+		XDBG("ev SDP Copy 1: %d %v from %d crt. trunc %v  crt. used %d\n",
+			n, ok2, len(d.Buf)-int(d.Used), d.Truncated, d.Used)
+		if n > 0 {
+			d.Used += n
+		}
+		d.sdpEoffs[1] = uint16(d.Used)
+		d.Truncated = d.Truncated || (!ok1 || !ok2)
+		XDBG("ev SDP Copy new Truncated %v\n", d.Truncated)
+	}
+
 	return d.Valid
 }
 
@@ -638,6 +699,10 @@ func (ed *EventData) String() string {
 	s += fmt.Sprintf("	DBG: last method: %v  last status:%v\n",
 		ed.LastMethod, ed.LastStatus)
 	s += fmt.Sprintf("	DBG: msg trace: %s\n", ed.LastMsgs.String())
+	if ed.Type.IsSDP() && ed.Type != EvSDPNone {
+		s += fmt.Sprintf("	sdp0 uac: %s \n", ed.SDP[0])
+		s += fmt.Sprintf("	sdp1 uas: %s \n", ed.SDP[1])
+	}
 	return s
 }
 
