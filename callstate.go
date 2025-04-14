@@ -987,6 +987,8 @@ type CallEntry struct {
 	regBinding *RegEntry // pointer to cached registry binding
 	// used to keep the current parsed SDP
 	sdp [2]*SDPsessInfo
+	// used to kepp track of associated RTP sessions
+	rtpSession *RTPSession
 
 	FinReplTS      timestamp.TS // final call establisment reply (>= 200)
 	EarlyDlgTS     timestamp.TS // early dialog (18x)
@@ -1053,6 +1055,20 @@ func (c *CallEntry) Unref() bool {
 				unlockRegEntry(c.regBinding)
 			}
 			c.regBinding.Unref()
+		}
+		if c.rtpSession != nil {
+			// NOTE: if refCnt is 0 then c.rtpSession must always be nil
+			// otherwise c would be still ref'ed from the rtp session
+			// entry and its rtp streams and refCnt would not be 0
+			BUG("CallEntry.Unref(): 0 refCnt but still linked "+
+				"from rtpSession: %p <- %p [%s]\n",
+				c, c.rtpSession, c.rtpSession.String())
+			// Failsafe: even in the "buggy" case attempt to "recover"
+			if c.rtpSession.ce == c {
+				// clear rtp session, but do not unref e (refcnt is already 0)
+				callEntryClearRTPSess(c, false)
+			}
+			c.rtpSession = nil
 		}
 		if c.sdp[0] != nil {
 			FreeSDPsessInfo(c.sdp[0])

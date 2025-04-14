@@ -65,10 +65,13 @@ var DefaultConfig = Config{
 
 var cstHash CallEntryHash
 var regHash RegEntryHash
+var rtpStreamsHash RTPStreamHash
 
 func init() {
 	cstHash.Init(HashSize)
 	regHash.Init(HashSize)
+	// TODO: init only if configured with rtp support ?
+	rtpStreamsHash.Init(HashSize)
 	initTimers()
 }
 
@@ -94,13 +97,19 @@ func GetCfg() *Config {
 	return (*Config)(p)
 }
 
-// LockCallEntry try to lock a CallEntry.
+// quick hack to use the hash from outside
+func GetRTPStreamHash() RTPStreamHash {
+	return rtpStreamsHash
+}
+
+// LockCallEntry tries to lock a CallEntry.
 // For now it locks the corresp. hash bucket list in the global cstHash.
 // Returns true if successful, false if not (entry "detached",
 // not linked in any list).
 // Warning: since it locks cstHash[e.hashNo] there is a deadlock
-//          if more then one entry with the same hash are locked from the
-//          same thread.
+//
+//	if more then one entry with the same hash are locked from the
+//	same thread.
 func LockCallEntry(e *CallEntry) bool {
 
 	h := e.hashNo
@@ -133,8 +142,9 @@ func UnlockCallEntry(e *CallEntry) bool {
 // For now it locks the corresp. hash bucket list in the global regHash.
 // Returns true if successful, false if not (entry not linked in any list).
 // Warning: since it locks regHash[r.hashNo] there is a deadlock
-//          if more then one entry with the same hash are locked from the
-//          same thread.
+//
+//	if more then one entry with the same hash are locked from the
+//	same thread.
 func lockRegEntry(r *RegEntry) bool {
 
 	h := r.hashNo
@@ -691,6 +701,7 @@ func unlinkCallEntryUnsafe(e *CallEntry, unref bool) bool {
 	} else {
 		BUG("not in cstHash\n")
 	}
+	refHeld := false
 	if re != nil {
 		h := re.hashNo
 		rm := false
@@ -706,14 +717,41 @@ func unlinkCallEntryUnsafe(e *CallEntry, unref bool) bool {
 			re.ce = nil
 			if unlinked || unref {
 				e.Unref()
+			} else {
+				refHeld = true // we hold one ref
 			}
-		} // else somebody changed/removed the link => bail out
+		} else {
+			// else somebody changed/removed the link => bail out
+			BUG("regBinding CallEntry link wrong: expected %p, got %p\n",
+				e, re.ce)
+		}
 		e.regBinding = nil
 		re.Unref()
 		regHash.HTable[h].Unlock()
 		if rm {
 			re.Unref()
 		}
+	}
+	if rtpSession != nil {
+		rtpSession.DestroyStreams(&rtpStreamsHash)
+		if rtpSession.ce == e {
+			rtpSession.ce = nil
+			rtpSession.ceHashNo.Store(^uint32(0))
+			if unlinked || unref || refHeld {
+				// unref always if a ref is already hold
+				// (if unlinked == false and unref == false
+				//   => keep one ref to avoid destroying e)
+				e.Unref()
+			} else {
+				refHeld = true // we hold one ref
+			}
+		} else {
+			// else somebody changed/removed the link => bail out
+			BUG("rtpSession CallEntry link changed: %p, but expected %p\n",
+				rtpSession.ce, e)
+		}
+		e.rtpSession = nil
+		rtpSession.Unref()
 	}
 	if unref && unlinked {
 		e.Unref()
@@ -1517,6 +1555,10 @@ func RegEntriesStatsHash(hs *HStats) uint64 {
 	return total
 }
 
+func RTPStreamsHashStats() HStats {
+	return rtpStreamsHash.Stats()
+}
+
 func PrintNCalls(w io.Writer, max int) {
 	n := 0
 	for i := 0; i < len(cstHash.HTable); i++ {
@@ -1713,4 +1755,11 @@ func PrintRegBindingsFilter(w io.Writer, start, max int, op int,
 		}
 		lst.Unlock()
 	}
+}
+
+// PrintRTPStreamsFilter prints the rtpStreamsHash entries that match.
+// For more informations see RTPStreamsHash.PrintFilter(...)
+func PrintRTPStreamsFilter(w io.Writer,
+	start, max, rateVal int, net *net.IPNet, re *regexp.Regexp) {
+	rtpStreamsHash.PrintFilter(w, start, max, rateVal, net, re)
 }
