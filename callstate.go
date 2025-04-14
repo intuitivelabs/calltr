@@ -974,13 +974,13 @@ type CallEntry struct {
 	ReqsNo     [2]uint
 	ReplsNo    [2]uint
 	ReplStatus [2]uint16
-	hashNo     uint32 // cache hash value
-	Flags      CallFlags
-	EvFlags    EventFlags      // sent/generated events
-	Method     sipsp.SIPMethod // creating method
-	State      CallState
-	ReqSig     sipsp.MsgSig // creating request msg sig
-	evHandler  HandleEvF    // event handler function
+	hashNo     uint32          // cache hash value
+	EvFlags    EventFlags      // sent/generated events (u32)
+	Flags      CallFlags       // call flags (u16)
+	Method     sipsp.SIPMethod // creating method  (u8)
+	State      CallState       // (u8)
+	ReqSig     sipsp.MsgSig    // creating request msg sig
+	evHandler  HandleEvF       // event handler function
 
 	// used only for REGISTERS:
 	regBinding *RegEntry // pointer to cached registry binding

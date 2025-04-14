@@ -64,7 +64,9 @@ func (e EventType) String() string {
 	return evTypeName[int(e)]
 }
 
-type EventFlags uint16
+
+// EventFlags holds a mask of generated sip related events.
+type EventFlags uint32
 
 const (
 	EvNoneF         EventFlags = iota
