@@ -57,6 +57,11 @@ func (rd RTPStreamData) String() string {
 		rd.Src.IP().String(), rd.Src.Port, rd.Flags)
 }
 
+func (rd *RTPStreamData) AddPkt(pkt []byte, ts timestamp.TS) {
+	rd.Stats.AddPkt(pkt, ts, rd.Type,
+		rd.Payloads[:rd.PayloadsNo], rd.ClkRates[:rd.PayloadsNo])
+}
+
 // matchLong returns true if the stream data matches and the data rate.
 // Params:
 //          rateVal - rate value as interger. The comparison direction is
@@ -77,7 +82,7 @@ func (rd *RTPStreamData) matchLong(rateVal int,
 	if !crtT.IsZero() {
 		delta := rd.Stats.Rate.Bytes.Delta
 		if delta != 0 {
-			v := rd.Stats.Bytes.Load() // current value
+			v := uint64(rd.Stats.Bytes.Load()) // current value
 			_, crtRate = rd.Stats.Rate.Bytes.ComputeRate(v, crtT, delta)
 			if rateVal > 0 {
 				if !(crtRate >= float64(rateVal)) {
