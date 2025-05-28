@@ -275,6 +275,9 @@ type EventData struct {
 	sdpSoffs [2]uint16      // start offset for SDP in Buf
 	sdpEoffs [2]uint16      // end offset for SDP in Buf
 
+	RTP       [EvRTPmaxSess][2]EvRTPstreamDataT
+	RTPsessNo uint8 // number of RTP sessions
+
 	Valid int    // no of valid, non truncated PFields
 	Used  int    // how much of the buffer is used / current offset
 	Buf   []byte // buffer where all the content is saved
@@ -469,6 +472,29 @@ func (d *EventData) Fill(ev EventType, e *CallEntry) int {
 		d.sdpEoffs[1] = uint16(d.Used)
 		d.Truncated = d.Truncated || (!ok1 || !ok2)
 		XDBG("ev SDP Copy new Truncated %v\n", d.Truncated)
+	}
+	// RTP
+	if e.rtpSession != nil {
+		streamsNo := len(e.rtpSession.streams)
+		if streamsNo > len(d.RTP) {
+			streamsNo = len(d.RTP)
+		}
+		for i := 0; i < streamsNo; i++ {
+			s1 := &e.rtpSession.streams[i][0]
+			s2 := &e.rtpSession.streams[i][1]
+			rtpStreamsHash.LockRTPStreamEntry(s1)
+			{
+				d.RTP[i][0].fillUnsafe(&s1.Stream)
+			}
+			rtpStreamsHash.UnlockRTPStreamEntry(s1)
+
+			rtpStreamsHash.LockRTPStreamEntry(s2)
+			{
+				d.RTP[i][1].fillUnsafe(&s2.Stream)
+			}
+			rtpStreamsHash.UnlockRTPStreamEntry(s2)
+		}
+		d.RTPsessNo = uint8(streamsNo)
 	}
 
 	return d.Valid
@@ -702,6 +728,14 @@ func (ed *EventData) String() string {
 	if ed.Type.IsSDP() && ed.Type != EvSDPNone {
 		s += fmt.Sprintf("	sdp0 uac: %s \n", ed.SDP[0])
 		s += fmt.Sprintf("	sdp1 uas: %s \n", ed.SDP[1])
+	}
+	if ed.RTPsessNo != 0 {
+		for i := uint(0); i < uint(ed.RTPsessNo); i++ {
+			s += fmt.Sprintf("	rtp0_%d: %s\n", i, ed.RTP[i][0].StreamString())
+			s += fmt.Sprintf("	rtp0_%d: %s\n", i, ed.RTP[i][0].PktsString())
+			s += fmt.Sprintf("	rtp1_%d: %s\n", i, ed.RTP[i][1].StreamString())
+			s += fmt.Sprintf("	rtp1_%d: %s\n", i, ed.RTP[i][1].PktsString())
+		}
 	}
 	return s
 }
