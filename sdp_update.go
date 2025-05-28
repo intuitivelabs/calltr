@@ -57,6 +57,10 @@ func InitSDPsupport() bool {
 		ERR("failed to init sdp stats: %v\n", err)
 		return false
 	}
+	if err, _ := rtpGlobalStatsInit(); err != nil {
+		ERR("failed to init rtp stats: %v\n", err)
+		return false
+	}
 	if GetCfg().SDP && (GetCfg().Mem.SDPtotalMem > 0) {
 		if !initAllocSDP(GetCfg().Mem.SDPtotalMem) {
 			ERR("sdp sessions alloc init failed for %d bytes\n",
