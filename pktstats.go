@@ -32,6 +32,7 @@ type PktStats struct {
 
 		Bytes PktRate
 	}
+	RTPdj          djBuf
 	RTPssrc        uint32
 	RTPPayloadType RTPcodec
 }
@@ -41,6 +42,7 @@ func (s *PktStats) Init() {
 	s.RTPpktTS0.Store(0)
 	s.RTPSeqNo0.Store(0)
 	s.RTPSampleRate = 0
+	s.RTPdj.Reset()
 }
 
 func (s *PktStats) InitRate(t0 timestamp.TS, delta time.Duration) {
@@ -143,6 +145,7 @@ func (s *PktStats) AddRTPpkt(pkt []byte, ts timestamp.TS,
 		}
 	}
 	s.RTPpktTSn.Store(uint32(rtph.TS))
+	s.RTPdj.Add(rtph.SeqNo, rtph.TS)
 	if crtPkts == 1 {
 		timestamp.AtomicCompareAndSwap(&s.RTPrcvdTS0, timestamp.Zero(), ts)
 		s.RTPpktTS0.CompareAndSwap(0, uint32(rtph.TS))
