@@ -69,6 +69,35 @@ func (h *RTPStreamHash) HashEntry(entry *RTPStreamEntry) uint32 {
 	return h.Hash(entry.Stream.Dst)
 }
 
+// LockRTPStreamEntry will lock the hash table bucket corresponding to
+// the given RTPStreamEntry. It can be used as a lock for changing
+// the content of the RTPStreamEntry.
+// It returns true on success (entry has a valid hash number) or false
+// if the entry does not seem to be in the hashtable.
+// WARNING: the entry must be "unlocked" with UnlockRTPStreamEntry() if
+// the return value was true.
+func (h *RTPStreamHash) LockRTPStreamEntry(entry *RTPStreamEntry) bool {
+	hash := entry.hashNo.Load()
+	if (hash == RTPHashNone) || (hash >= uint32(len(h.HTable))) {
+		return false
+	}
+	h.HTable[hash].Lock()
+	return true
+}
+
+// UnlockRTPStreamEntry will unlock the hash table bucket corresponding to
+// the given RTPStreamEntry, previously locked with LockRTPStreamEntry.
+// It returns true on success (entry has a valid hash number) or false
+// if the entry does not seem to be in the hashtable.
+func (h *RTPStreamHash) UnlockRTPStreamEntry(entry *RTPStreamEntry) bool {
+	hash := entry.hashNo.Load()
+	if (hash == RTPHashNone) || (hash >= uint32(len(h.HTable))) {
+		return false
+	}
+	h.HTable[hash].Unlock()
+	return true
+}
+
 /* AddTo adds a RTPStreamEntry to the hash, sets the hash specific fields
  * and marks it as in-the-hash */
 func (h *RTPStreamHash) AddTo(hash uint32, entry *RTPStreamEntry) uint32 {
@@ -373,6 +402,59 @@ func (h *RTPStreamHash) GetBestMatchStream(dst, src NetInfo) (RTPMatchT, *RTPStr
 	return match, res
 }
 
+// ProcessPkt does all the processing needed for received RTP packet.
+// It looks for the best matching entry, updates the statistics and copies
+// the matching callid (if  a match is found). It combines
+// GetBestMatchStream(...), Stream.AddPkt(...) and GetBestMatchCallid(...).
+// The callid of the best match will be matched into the provided
+// callid slice.
+// It returns the match type (RTPNoMatch on failure),
+// the numbers of callid bytes copied and the original callid size.
+// It might return a match, but a 0-length original callid, if the call
+// state is in the process of being destroyed and no callid could be found
+// or if the provided destination call-id is nil (no interest in the call-id).
+// The caller should check if the callid did fit fully in the provided slice.
+func (h *RTPStreamHash) ProcessPkt(dst, src NetInfo,
+	ts timestamp.TS, payload []byte, dstCallid []byte) (RTPMatchT, int, int) {
+	var match RTPMatchT
+	var copied, origSz int
+	var rtpEntry *RTPStreamEntry
+
+	hash := h.Hash(dst)
+	h.HTable[hash].Lock()
+	{
+		rtpEntry, match = h.HTable[hash].BestMatchUnsafe(dst, src)
+		if rtpEntry != nil {
+			rtpSess := rtpEntry.RTPSession()
+			if len(dstCallid) != 0 && rtpSess != nil {
+				rtpSess.Ref()
+				/* if the stream is in the stream hash and the current
+				 * hash list is locked rs.ce cannot change under us
+				 * (is only set when creating a new rtp session, before
+				 *  adding any streams to the hash, or after removing
+				 * all the streams from the hash via RemoveAllStreams()
+				 */
+				ce := rtpSess.ce
+				if ce != nil {
+					if LockCallEntry(ce) {
+						cid := ce.Key.GetCallID()
+						copied = copy(dstCallid, cid)
+						origSz = len(cid)
+						UnlockCallEntry(ce)
+					} else {
+						WARN("failed to lock callentry %p" +
+							" (removed from hash?)\n")
+					}
+				}
+			}
+			rtpEntry.Stream.AddPkt(payload, ts)
+		} // else rtpEntry == nil => no entry found for the packet
+	}
+	h.HTable[hash].Unlock()
+	// TODO: if not found (rtpEntry == nil) update some stats
+	return match, copied, origSz
+}
+
 /* PutStream will release references to a RTPStreamEntry
  * previously obtained via one of the Get*Stream() functions.
  * WARNING: do not use for the results of the Get*() functions that
@@ -439,24 +521,37 @@ func (h *RTPStreamHash) PrintFilter(w io.Writer,
 			print, rate := e.Stream.matchLong(rateVal, net, re, now)
 			if print && n >= start {
 				printed++
-				fmt.Fprintf(w, "%6d. %s created %s (%s ago)"+
-					"\n",
+				fmt.Fprintf(w, "%6d. %s created %s (%s ago)\n",
 					n, e.String(),
 					e.Stream.Stats.Rate.T0.Truncate(time.Second),
-					now.Sub(e.Stream.Stats.Rate.T0).Truncate(time.Second))
-				fmt.Fprintf(w, "       pkts: %5d  bytes: %9d Kb\n",
+					now.Sub(e.Stream.Stats.Rate.T0).Truncate(time.Second),
+				)
+				fmt.Fprintf(w, "rtp    payload: %d  clk rate: %6d\n",
+					e.Stream.Stats.RTPPayloadType,
+					e.Stream.Stats.RTPSampleRate)
+				fmt.Fprintf(w, "rtp    pkts: %5d  bytes: %9d Kb\n",
+					e.Stream.Stats.RTPpkts.Load(),
+					e.Stream.Stats.RTPbytes.Load()/1024,
+				)
+				fmt.Fprintf(w, "total  pkts: %5d  bytes: %9d Kb\n",
 					e.Stream.Stats.Pkts.Load(),
 					e.Stream.Stats.Bytes.Load()/1024,
 				)
 				if e.Stream.Stats.Rate.Bytes.Delta != 0 {
-					fmt.Fprintf(w, "       rate: %7.2f (old: %7.2f) / %s"+
-						" (u: %v ago)",
+					fmt.Fprintf(w, "       rate:  %7.2f (old: %7.2f) / %s"+
+						" (u: %v ago)\n",
 						rate, e.Stream.Stats.Rate.Bytes.Rate,
 						e.Stream.Stats.Rate.Bytes.Delta,
 						now.Sub(e.Stream.Stats.Rate.Bytes.Updated))
 
 				}
-				fmt.Fprintln(w)
+				if e.Stream.Stats.RTPSampleRate != 0 {
+					jitter, jitterMS := e.Stream.Stats.Jitter()
+					loss := e.Stream.Stats.Loss()
+					fmt.Fprintf(w, "       jitter:%7.2f (%7.2f ms)"+
+						" loss: %2.2f%%\n",
+						jitter, jitterMS, loss)
+				}
 				fmt.Fprintln(w)
 				if printed > max {
 					lst.Unlock()

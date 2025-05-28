@@ -196,6 +196,7 @@ func (r *RTPSession) addStreamEntry(e *RTPStreamEntry, h *RTPStreamHash) bool {
 			e.mline, e.side, e.Stream.Flags, e.Detached(), e.hashNo.Load())
 		return false
 	}
+	e.Stream.Stats.Init()
 	now := timestamp.Now()
 	e.Stream.Stats.InitRate(now, time.Second)
 	hashNo := h.HashEntry(e)
