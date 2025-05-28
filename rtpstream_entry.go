@@ -39,13 +39,16 @@ const (
 // RTPStreamData holds one stream
 // (caller or callee)
 type RTPStreamData struct {
-	Dst   NetInfo // destination (e.g. from SDP)
-	Src   NetInfo // expected source (assuming symmetric RTP)
-	Src2  NetInfo // discovered source
-	Stats PktStats
-	Flags RTPStreamFlags
-	Type  MediaType
-	Proto MediaProto
+	Dst        NetInfo // destination (e.g. from SDP)
+	Src        NetInfo // expected source (assuming symmetric RTP)
+	Src2       NetInfo // discovered source
+	Stats      PktStats
+	Flags      RTPStreamFlags
+	Type       MediaType
+	Proto      MediaProto
+	PayloadsNo uint8                // number of possible payloads
+	Payloads   [SDPmaxFormats]uint8 // possible RTP payload types
+	ClkRates   [SDPmaxFormats]uint  // corresponding sample rate
 }
 
 func (rd RTPStreamData) String() string {
@@ -105,6 +108,9 @@ func (rsd *RTPStreamData) SetDstFromMediaDesc(md *MediaDesc,
 	//  use mdesc.MLine (ports, type, proto)
 	rsd.Type = md.MLine.Type
 	rsd.Proto = md.MLine.Proto
+	rsd.PayloadsNo = md.MLine.FormatsNo
+	rsd.Payloads = md.MLine.Formats
+	rsd.ClkRates = md.ClkRates
 	// support for one port only
 	// use msection.C with fallback to sdp.C
 	if !setNetInfofromMediaDesc(&rsd.Dst, md, fbkC) {
