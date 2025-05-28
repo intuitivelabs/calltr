@@ -252,6 +252,8 @@ func ParseMediaProtoList(lst []string) MediaProto {
 	return MediaProtoUnknown
 }
 
+const SDPmaxFormats = 32 // maximum payload types for an m-line
+
 /* SDPmLine contains a parsed "m=" line from the SDP,
 * m - media desc (multiple sections): media port proto fmt..
 *          media -> media type: audio, video, text, application , message
@@ -266,7 +268,7 @@ type SDPmLine struct {
 	PortsNo   uint8      // number of ports
 	FormatsNo uint8      // number of used formats (below)
 	Port      uint16
-	Formats   [32]uint8 // payload type represented on 7 bits RTP
+	Formats   [SDPmaxFormats]uint8 // payload type represented on 7 bits RTP
 }
 
 func (m SDPmLine) String() string {
@@ -338,9 +340,10 @@ func ParseSDPmLine(media string, port int, prange *int,
 *        c - connection info
  */
 type MediaDesc struct {
-	MLine SDPmLine
-	C     ConnInfo
-	Attrs SDPAttrArray // attributes list (a=...)
+	MLine    SDPmLine
+	C        ConnInfo
+	Attrs    SDPAttrArray        // attributes list (a=...)
+	ClkRates [SDPmaxFormats]uint // sample rate for each format in MLine
 }
 
 func (md MediaDesc) String(buf []byte) string {

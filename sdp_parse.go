@@ -7,6 +7,8 @@
 package calltr
 
 import (
+	"strconv"
+
 	"github.com/intuitivelabs/sipsp"
 	"github.com/intuitivelabs/unsafeconv"
 	sdp "github.com/pion/sdp/v3"
@@ -178,6 +180,29 @@ func SDPsessInfoStore(sess *SDPsessInfo, dstBuf []byte,
 			sess.Reset(true)
 			sdpStats.cnts.Inc(sdpStats.parseErr)
 			return int(ErrSDPparse)
+		}
+		// look for rtpmap attrs
+		for _, a := range mdesc.Attributes {
+			if a.Key == "rtpmap" {
+				pt, ptName, clkRate, chs := parseRTPMAPval(a.Value)
+				if pt >= 0 {
+					j := uint8(0)
+					for ; j < md.MLine.FormatsNo; j++ {
+						if md.MLine.Formats[j] == uint8(pt) {
+							md.ClkRates[j] = clkRate
+							break
+						}
+					}
+					if j >= md.MLine.FormatsNo {
+						ERR("found rtpmap:%d %s/%d[/%d] (%q) with no "+
+							"corresponding payload in the mline (%q)\n",
+							pt, ptName, clkRate, chs, a.Value,
+							mdesc.MediaName)
+						ERR("payloads no: %d j= %d mline: %q\n",
+							md.MLine.FormatsNo, j, md.MLine.String())
+					}
+				}
+			}
 		}
 
 		// c=
@@ -393,4 +418,72 @@ func SDPsessDescGetBufSz(sesDesc *sdp.SessionDescription) int {
 		sz += getSDPAttrsSz(mdesc.Attributes)
 	}
 	return sz
+}
+
+// parseRTPMAPval parser the content of a rtpmap attribute
+// (the part after rtpmap:)
+// Expected format:
+//
+//	<payload type> <encoding name>/<clock rate>[/<encoding parameters>
+//
+// It returns the payload type, encoding name, clock rate and
+// the number of channels (if present).
+// On error it would return a negative payload.
+func parseRTPMAPval(val string) (int, string, uint, uint8) {
+	var payload int
+	var name string
+	var clkRate uint
+	var chs uint8
+	var i, s, tokNo int
+	var tok [4]string
+	var inToken bool
+
+	// 1st token separated by space, the rest by '/'
+	for ; i < len(val); i++ {
+		if !inToken && val[i] != ' ' {
+			s = i
+			inToken = true
+		}
+		if inToken {
+			if (tokNo == 0 && val[i] == ' ') ||
+				(tokNo != 0 && val[i] == '/') {
+				tok[tokNo] = val[s:i]
+				tokNo++
+				inToken = false
+				if tokNo >= len(tok) {
+					// last token contains everything
+					tok[len(tok)-1] = val[s:]
+					break
+				}
+				s = i + 1
+			}
+		}
+	}
+	if inToken { // token terminated by end of string
+		if tokNo < len(tok) {
+			tok[tokNo] = val[s:]
+			tokNo++
+		}
+		inToken = false
+	}
+	if tokNo >= 3 { // fmt name/sample_rate[/...]
+		if v, err := strconv.Atoi(tok[0]); err == nil {
+			payload = v
+		} else {
+			return -1, "", 0, 0
+		}
+		name = tok[1]
+		if v, err := strconv.Atoi(tok[2]); err == nil && v >= 0 {
+			clkRate = uint(v)
+		} else {
+			clkRate = 0
+		}
+		if tokNo >= 4 {
+			if v, err := strconv.Atoi(tok[3]); err == nil {
+				chs = uint8(v)
+			}
+		}
+		return payload, name, clkRate, chs
+	}
+	return -1, "", 0, 0
 }
