@@ -260,7 +260,7 @@ func (r *RTPSession) AddStreams(h *RTPStreamHash) (bool, int) {
 			added++
 			// DBG("XXX: RTP: success adding stream %d 0\n", i)
 		}
-		DBG("XXX: RTP: trying to add stream %d 1\n", i)
+		//DBG("XXX: RTP: trying to add stream %d 1\n", i)
 		if r.AddStream(i, 1, h) {
 			added++
 			// DBG("XXX: RTP: success adding stream %d 1\n", i)
@@ -409,6 +409,6 @@ func callEntryActivateRTPSess(e *CallEntry) (int, int) {
 
 	// enable the streams
 	_, n = e.rtpSession.AddStreams(&rtpStreamsHash)
-	DBG("XXX: RTP: added %d rtp streams\n", n)
+	// DBG("XXX: RTP: added %d rtp streams\n", n)
 	return 0, n
 }
