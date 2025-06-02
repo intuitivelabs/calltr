@@ -41,11 +41,11 @@ type RTPSession struct {
 	streams [][2]RTPStreamEntry
 
 	//used      uint8        // used streams entries in streams
-	destroyed atomic.Int32 // > 0 if in the process of being destroyed
-	active    atomic.Int32 // active streams
-	refCnt    atomic.Int32
-	ceHashNo  atomic.Uint32 // hash for the "parent" CallEntry
-	ce        *CallEntry    // pointer to corresp. Callentry
+	unlinked atomic.Int32 // > 0 if in the process of being destroyed
+	active   atomic.Int32 // active streams
+	refCnt   atomic.Int32
+	ceHashNo atomic.Uint32 // hash for the "parent" CallEntry
+	ce       *CallEntry    // pointer to corresp. Callentry
 }
 
 func (r *RTPSession) String() string {
@@ -53,9 +53,9 @@ func (r *RTPSession) String() string {
 		return "nil"
 	}
 	return fmt.Sprintf(
-		"%d active / 2*%d streams refCnt: %d destroyed: %d ceH: %d",
+		"%d active / 2*%d streams refCnt: %d unlinked: %d ceH: %d",
 		r.active.Load(), len(r.streams), r.refCnt.Load(),
-		r.destroyed.Load(), r.ceHashNo.Load())
+		r.unlinked.Load(), r.ceHashNo.Load())
 }
 
 func (r *RTPSession) InitWithStreams(streams [][2]RTPStreamEntry) {
@@ -186,7 +186,7 @@ func (r *RTPSession) addStreamEntry(e *RTPStreamEntry, h *RTPStreamHash) bool {
 	if e.Stream.Flags&RTPSDisabledF != 0 {
 		return false // stream disabled
 	}
-	if r.destroyed.Load() != 0 {
+	if r.unlinked.Load() != 0 {
 		// don't add any stream if in the process of being destroyed
 		return false
 	}
@@ -228,9 +228,9 @@ func (r *RTPSession) AddStream(mline, side int, h *RTPStreamHash) bool {
 	return r.addStreamEntry(&r.streams[mline][side], h)
 }
 
-// DestroyStreams will remove all the streams.
-func (r *RTPSession) DestroyStreams(h *RTPStreamHash) {
-	r.destroyed.Add(1)
+// RmStreams will unlink/inactivate all the streams.
+func (r *RTPSession) RmStreams(h *RTPStreamHash) {
+	r.unlinked.Add(1)
 	for r.active.Load() != 0 {
 		for i := 0; i < len(r.streams); i++ { // TODO: r.used or r.active ?
 			// streams[i][0].Stream.Flags & RTPRemovedF == 0  // atomic?
@@ -244,13 +244,27 @@ func (r *RTPSession) DestroyStreams(h *RTPStreamHash) {
 	}
 }
 
+// destroyStreamsUnsafe will clean all the streams.
+// The rtp session should not be in any hash.
+func (r *RTPSession) destroyStreamsUnsafe() {
+	// do nothing for now
+}
+
+// DestroyStreams will remove all the streams.
+func (r *RTPSession) DestroyStreams(h *RTPStreamHash) {
+	if r.unlinked.Load() == 0 {
+		r.RmStreams(h)
+	}
+	r.destroyStreamsUnsafe()
+}
+
 // AddStreams will add all the streams to the specified stream hash table.
 // It returns true if all the streams were successfully added and the
 // number of added streams (total from both sides)
 func (r *RTPSession) AddStreams(h *RTPStreamHash) (bool, int) {
-	if r.destroyed.Load() != 0 {
+	if r.unlinked.Load() != 0 {
 		// don't add any stream if in the process of being destroyed
-		DBG("trying to add streams to a destroyed rtp session\n")
+		DBG("trying to add streams to an unlinked rtp session\n")
 		return false, 0
 	}
 	added := 0

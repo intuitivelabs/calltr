@@ -1038,7 +1038,18 @@ func (c *CallEntry) Ref() int32 {
 // Unref decrements the reference counter and if 0 frees the CallEntry.
 // Returns true if the CallEntry was freed and false if it's still referenced
 func (c *CallEntry) Unref() bool {
-	if atomic.AddInt32(&c.refCnt, -1) == 0 {
+	return c.UnrefN(1)
+}
+
+// UnrefN decrements the reference counter by n and if 0 frees the CallEntry.
+// Returns true if the CallEntry was freed and false if it's still referenced
+func (c *CallEntry) UnrefN(n uint32) bool {
+	v := atomic.AddInt32(&c.refCnt, -int32(n))
+	if v < 0 {
+		BUG("CallEntry.UnrefN(%d): %d refCnt less then 0\n",
+			n, v)
+	}
+	if v <= 0 { // try to go on even if refCnt negative
 		// sanity regBinding check
 		if c.regBinding != nil {
 			// NOTE: if refCnt is 0 then c.regBinding should be always nil
@@ -1082,6 +1093,57 @@ func (c *CallEntry) Unref() bool {
 		return true
 	}
 	return false
+}
+
+// UnrefCleanUnsafe will free/clean all the extras linked to a
+// CallEntry that is _not_ in the hash.
+// WARNING: make sure first that the CallEntry is not in the hash
+// (e.g. call unlinkCallEntryUnsafe() first).
+// The current version frees the reg cache linked entry and the
+// rtp sessions (unlinkCallEntry() above will remove the CallEntry,
+// and associated reg entry and rtp sessions from all the global
+// accessible hashes, but it will not free / unref the entries or
+// the parent CallEntry).
+// If unref is false it will still keep a ref. to
+// the CallEntry.
+func (c *CallEntry) UnrefCleanUnsafe(unref bool) {
+	re := c.regBinding
+	rtpSession := c.rtpSession
+	rmRefs := uint32(0)
+	if re != nil {
+		// TODO: use a canary value for removed entries in re.hashNo
+		// h := re.hashNo
+		if re.ce == c {
+			re.ce = nil
+			rmRefs++ // we removed 1 ref
+		} else {
+			// else somebody changed/removed the link => bail out
+			BUG("regBinding CallEntry link wrong: expected %p, got %p\n",
+				c, re.ce)
+		}
+		c.regBinding = nil
+		re.Unref()
+	}
+	if rtpSession != nil {
+		rtpSession.destroyStreamsUnsafe()
+		// TODO: check for rtpSession.ceHashNo. "removed" magic value
+		// if rtpSession.ceHashNo.Load() != (^uint32(0)) ...
+		if rtpSession.ce == c {
+			rtpSession.ce = nil
+			rmRefs++ // we removed 1 ref
+		} else {
+			// else somebody changed/removed the link => bail out
+			BUG("rtpSession CallEntry link changed: %p, but expected %p\n",
+				rtpSession.ce, c)
+		}
+		c.rtpSession = nil
+		rtpSession.Unref()
+	}
+	if unref {
+		c.UnrefN(rmRefs + 1)
+	} else {
+		c.UnrefN(rmRefs)
+	}
 }
 
 // lastState returns the last state and true if there is a last state
