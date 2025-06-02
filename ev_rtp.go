@@ -12,8 +12,11 @@ type EvRTPstreamDataT struct {
 	Src net.IP
 	Dst net.IP
 
-	Jitter float64
-	Loss   float64
+	Jitter         float64
+	Loss           float64
+	RateRTPpkts    float64
+	RateBytes      float64
+	RateBytesLastS float64
 
 	Bytes    uint32
 	Pkts     uint32
@@ -43,6 +46,9 @@ func (evr *EvRTPstreamDataT) fillUnsafe(rs *RTPStreamData) bool {
 
 	_, evr.Jitter = rs.Stats.Jitter() // jitter in ms
 	evr.Loss = rs.Stats.Loss()        // percent
+	evr.RateRTPpkts, _ = rs.Stats.ComputeOverallRTPrate()
+	evr.RateBytes, _ = rs.Stats.ComputeOverallBytesRate()
+	evr.RateBytesLastS = rs.Stats.Rate.Bytes.Rate
 
 	evr.Bytes = uint32(rs.Stats.Bytes.Load())
 	evr.Pkts = uint32(rs.Stats.Pkts.Load())
@@ -72,10 +78,12 @@ func (evr *EvRTPstreamDataT) String() string {
 
 func (evr *EvRTPstreamDataT) StreamString() string {
 	s := fmt.Sprintf("dst: %s:%d src: %s:%d pt: %d type: %s proto: %s"+
-		" ssrc: %9d jitter: %f loss: %f",
+		" ssrc: %9d jitter: %f loss: %f"+
+		"  rate: %f pkts/s %f B/s last s: %f b/s ",
 		evr.Dst.String(), evr.DPort, evr.Src.String(), evr.SPort,
 		evr.Payload, evr.Type, evr.Proto, evr.SSRC,
 		evr.Jitter, evr.Loss,
+		evr.RateRTPpkts, evr.RateBytes, evr.RateBytesLastS,
 	)
 	return s
 }
@@ -87,6 +95,13 @@ func (evr *EvRTPstreamDataT) PktsString() string {
 		evr.RTPpkts, evr.Pkts, evr.Expected,
 		evr.DjStats.DropOld, evr.DjStats.OutOfOrder, evr.DjStats.Dups,
 		evr.DjStats.TotalQueued, evr.RTPbytes, evr.Bytes,
+	)
+	return s
+}
+
+func (evr *EvRTPstreamDataT) RatesString() string {
+	s := fmt.Sprintf("rate: %f pkts/s %f B/s last s: %f b/s ",
+		evr.RateRTPpkts, evr.RateBytes, evr.RateBytesLastS,
 	)
 	return s
 }

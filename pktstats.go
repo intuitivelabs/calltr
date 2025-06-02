@@ -63,6 +63,24 @@ func (s *PktStats) UpdateRate(crtT timestamp.TS) float64 {
 	return rate
 }
 
+// ComputeRate compute rate since first packet.
+// It returns the rate and true on success or 0 and false on failure
+//
+//	(invalid timestamp)
+func (s *PktStats) ComputeRateStart(crtT timestamp.TS) (float64, bool) {
+	return computeRate(crtT, s.Rate.T0, s.Pkts.Load())
+}
+
+// compute RTP rate between first packet and last packet received times.
+func (s *PktStats) ComputeOverallRTPrate() (float64, bool) {
+	return computeRate(s.RTPrcvdTSn, s.RTPrcvdTS0, s.RTPpkts.Load())
+}
+
+// compute bytes rate between first packet and last packet received times.
+func (s *PktStats) ComputeOverallBytesRate() (float64, bool) {
+	return computeRate(s.RTPrcvdTSn, s.Rate.T0, s.Bytes.Load())
+}
+
 func (s *PktStats) AddPktSz(size uint32) {
 	s.Pkts.Add(1)
 	s.Bytes.Add(size)
