@@ -733,8 +733,9 @@ func (ed *EventData) String() string {
 		for i := uint(0); i < uint(ed.RTPsessNo); i++ {
 			s += fmt.Sprintf("	rtp0_%d: %s\n", i, ed.RTP[i][0].StreamString())
 			s += fmt.Sprintf("	rtp0_%d: %s\n", i, ed.RTP[i][0].PktsString())
+			s += fmt.Sprintf("	rtp0_%d: %s\n", i, ed.RTP[i][0].RatesString())
 			s += fmt.Sprintf("	rtp1_%d: %s\n", i, ed.RTP[i][1].StreamString())
-			s += fmt.Sprintf("	rtp1_%d: %s\n", i, ed.RTP[i][1].PktsString())
+			s += fmt.Sprintf("	rtp1_%d: %s\n", i, ed.RTP[i][1].RatesString())
 		}
 	}
 	return s
