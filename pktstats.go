@@ -91,6 +91,7 @@ func (s *PktStats) AddPktSz(size uint32) {
 func (s *PktStats) AddPkt(pkt []byte, ts timestamp.TS,
 	mediaType MediaType, payloadTypes []uint8, clkRates []uint) {
 	s.AddPktSz(uint32(len(pkt)))
+	s.UpdateRate(ts)
 	size := counters.Val(len(pkt))
 
 	switch StreamPktType(pkt) {
