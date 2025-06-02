@@ -678,16 +678,16 @@ func addCallEntryUnsafe(e *CallEntry, m *sipsp.PSIPMsg,
 	return true, ev, sdpEv
 }
 
-// unlinkCallEntryUnsafe removes a CallEntry from the tracked calls.
+// unlinkCleanCallEntryUnsafe removes a CallEntry from the tracked calls.
 // It removes it from the CallEntry hash, the corresp. RegCache
-// entry (if present) and it also removes all the RTP Streams
-// (via the RTP Sessions).
+// entry (if present), removes all the RTP Streams
+// (via the RTP Sessions) and frees them.
 // If unref is false it will still keep a ref. to
 // the CallEntry.
 // It returns true if the entry was removed from the hash, false if not
 // (already removed)
 // WARNING: the proper hash lock must be already held.
-func unlinkCallEntryUnsafe(e *CallEntry, unref bool) bool {
+func unlinkCleanCallEntryUnsafe(e *CallEntry, unref bool) bool {
 	re := e.regBinding
 	rtpSession := e.rtpSession
 	unlinked := false
@@ -735,7 +735,7 @@ func unlinkCallEntryUnsafe(e *CallEntry, unref bool) bool {
 		}
 	}
 	if rtpSession != nil {
-		rtpSession.DestroyStreams(&rtpStreamsHash)
+		rtpSession.DestroyStreams(&rtpStreamsHash) // automatically unrefs
 		if rtpSession.ce == e {
 			rtpSession.ce = nil
 			rtpSession.ceHashNo.Store(^uint32(0))
@@ -754,6 +754,74 @@ func unlinkCallEntryUnsafe(e *CallEntry, unref bool) bool {
 		}
 		e.rtpSession = nil
 		rtpSession.Unref()
+	}
+	if unref && unlinked {
+		e.Unref()
+	}
+	return unlinked
+}
+
+// unlinkCallEntryUnsafe removes a CallEntry from the tracked calls.
+// It removes it from the CallEntry hash, the corresp. RegCache
+// entry (if present) and it also removes all the RTP Streams
+// (via the RTP Sessions). It will not free the RegCache or RTP Streams
+// (they will still be linked to the CallEntry, but no longer linked in the
+//
+//	global hashes). This allows event generation outside of look for a detached
+//	CallEntry.
+//
+// It returns true if the entry was removed from the hash, false if not
+// (already removed)
+// WARNING: the proper hash lock must be already held.
+func unlinkCallEntryUnsafe(e *CallEntry, unref bool) bool {
+	re := e.regBinding
+	rtpSession := e.rtpSession
+	unlinked := false
+	if !cstHash.HTable[e.hashNo].Detached(e) {
+		cstHash.HTable[e.hashNo].Rm(e)
+		cstHash.HTable[e.hashNo].DecStats()
+		cstHash.entries.Dec(1)
+		cstHash.cnts.grp.Dec(cstHash.cnts.hActive)
+		if e.State != CallStNone && e.State != CallStInit {
+			cstHash.cnts.grp.Dec(cstHash.cnts.hState[int(e.State)])
+		}
+		unlinked = true
+	} else {
+		BUG("not in cstHash\n")
+	}
+	if re != nil {
+		h := re.hashNo
+		rm := false
+		regHash.HTable[h].Lock()
+		if !regHash.HTable[h].Detached(re) {
+			regHash.HTable[h].Rm(re)
+			regHash.HTable[h].DecStats()
+			regHash.entries.Dec(1)
+			regHash.cnts.grp.Dec(regHash.cnts.hActive)
+			// TODO: mark the removed entry via a magic value in re.hashNo
+			rm = true
+		}
+		if re.ce != e {
+			// else somebody changed/removed the link => bail out
+			BUG("regBinding CallEntry link wrong: expected %p, got %p\n",
+				e, re.ce)
+		}
+		regHash.HTable[h].Unlock()
+		if rm {
+			re.Unref()
+		}
+		//  keep 1 ref from e
+	}
+	if rtpSession != nil {
+		rtpSession.RmStreams(&rtpStreamsHash) // automatically unrefs()
+		if rtpSession.ce == e {
+			rtpSession.ceHashNo.Store(^uint32(0))
+		} else {
+			// else somebody changed/removed the link => bail out
+			BUG("rtpSession CallEntry link changed: %p, but expected %p\n",
+				rtpSession.ce, e)
+		}
+		// keep 1 ref from e
 	}
 	if unref && unlinked {
 		e.Unref()
