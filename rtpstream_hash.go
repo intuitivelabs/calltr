@@ -419,6 +419,7 @@ func (h *RTPStreamHash) ProcessPkt(dst, src NetInfo,
 	var match RTPMatchT
 	var copied, origSz int
 	var rtpEntry *RTPStreamEntry
+	var ce *CallEntry
 
 	hash := h.Hash(dst)
 	h.HTable[hash].Lock()
@@ -434,23 +435,30 @@ func (h *RTPStreamHash) ProcessPkt(dst, src NetInfo,
 				 *  adding any streams to the hash, or after removing
 				 * all the streams from the hash via RemoveAllStreams()
 				 */
-				ce := rtpSess.ce
+				ce = rtpSess.ce
 				if ce != nil {
-					if LockCallEntry(ce) {
-						cid := ce.Key.GetCallID()
-						copied = copy(dstCallid, cid)
-						origSz = len(cid)
-						UnlockCallEntry(ce)
-					} else {
-						WARN("failed to lock callentry %p" +
-							" (removed from hash?)\n")
-					}
+					ce.Ref()
+					// to avoid a possible deadlock don't copy
+					// the callid here, under rtpstream hash lock
+					// (since it would require locking ce)
 				}
 			}
 			rtpEntry.Stream.AddPkt(payload, ts)
 		} // else rtpEntry == nil => no entry found for the packet
 	}
 	h.HTable[hash].Unlock()
+	if ce != nil {
+		if LockCallEntry(ce) {
+			cid := ce.Key.GetCallID()
+			copied = copy(dstCallid, cid)
+			origSz = len(cid)
+			UnlockCallEntry(ce)
+		} else {
+			WARN("failed to lock callentry %p" +
+				" (removed from hash?)\n")
+		}
+		ce.Unref()
+	}
 	// TODO: if not found (rtpEntry == nil) update some stats
 	return match, copied, origSz
 }
