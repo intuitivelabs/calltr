@@ -197,7 +197,7 @@ func callEntryIgnoreReqSDP(e *CallEntry,
 		// if no SDP in request, completely ignore
 		// (it cannot "confirm" an offer from a reply if it has no sdp)
 		// neither an offer or an answer
-		DBG("XXX: sdp update: no sdp in request: ignore\n")
+		// DBG("XXX: sdp update: no sdp in request: ignore\n")
 		return true, flags // no SDP to update with
 	}
 	// check if sdp is expected or should be ignored
@@ -469,15 +469,16 @@ func callEntryUpdateReqSDP(e *CallEntry, dir int, m *sipsp.PSIPMsg,
 		if flags.Test(fSDPanswer) &&
 			e.sdp[otherIdx] != nil && !e.sdp[otherIdx].IsEmpty() {
 			if !e.sdp[otherIdx].status.flags.Test(fSDPconfirmed) {
-				DBGsdp(e, dir, m, sdpIdx,
-					"sdp update confirmed other on ignored req")
+				/*
+					DBGsdp(e, dir, m, sdpIdx,
+						"sdp update confirmed other on ignored req")
+				*/
 				e.sdp[otherIdx].status.flags.Clear(fSDPpending)
 				e.sdp[otherIdx].status.flags.Set(fSDPconfirmed | fSDPoffer)
 				sdpStats.cnts.Inc(sdpStats.confirmed)
 				// confirmed "new" sdp -> add RTP session
 				if e.sdp[0].status.flags.Test(fSDPconfirmed) &&
 					e.sdp[1].status.flags.Test(fSDPconfirmed) {
-					DBG("XXX: RTP: activating rtpsess - confirmed no sdp\n")
 					res, _ = callEntryActivateRTPSess(e)
 				}
 			}
@@ -489,21 +490,25 @@ func callEntryUpdateReqSDP(e *CallEntry, dir int, m *sipsp.PSIPMsg,
 
 	if flags.Test(fSDPanswer) {
 		sdpStats.cnts.Inc(sdpStats.answReq)
-		if e.sdp[sdpIdx] != nil {
-			DBG("XXX: answer in request callid %q method %s call state: %s msg trace: %s  state trace: %s old:\n %s\nnew:\n %q\n",
-				e.Key.GetCallID(), m.FL.MethodNo, e.State,
-				e.lastMsgs.String(), e.prevState.String(),
-				*e.sdp[sdpIdx], m.Body.Get(m.Buf))
-		} else {
-			DBG("XXX: answer in request callid %q method %s call state: %s msg trace: %s  state trace: %s 1st nsdp:\n %q\n",
-				e.Key.GetCallID(), m.FL.MethodNo, e.State,
-				e.lastMsgs.String(), e.prevState.String(),
-				m.Body.Get(m.Buf))
-		}
+		/*
+			if e.sdp[sdpIdx] != nil {
+				DBG("XXX: answer in request callid %q method %s call state: %s msg trace: %s  state trace: %s old:\n %s\nnew:\n %q\n",
+					e.Key.GetCallID(), m.FL.MethodNo, e.State,
+					e.lastMsgs.String(), e.prevState.String(),
+					*e.sdp[sdpIdx], m.Body.Get(m.Buf))
+			} else {
+				DBG("XXX: answer in request callid %q method %s call state: %s msg trace: %s  state trace: %s 1st nsdp:\n %q\n",
+					e.Key.GetCallID(), m.FL.MethodNo, e.State,
+					e.lastMsgs.String(), e.prevState.String(),
+					m.Body.Get(m.Buf))
+			}
+		*/
 		if e.sdp[otherIdx] != nil && !e.sdp[otherIdx].IsEmpty() {
 			if !e.sdp[otherIdx].status.flags.Test(fSDPconfirmed) {
-				DBGsdp(e, dir, m, sdpIdx,
-					"sdp update confirmed other on request")
+				/*
+					DBGsdp(e, dir, m, sdpIdx,
+						"sdp update confirmed other on request")
+				*/
 				//e.sdp[otherIdx].status.state = sdpStateConfirmed
 				e.sdp[otherIdx].status.flags.Clear(fSDPpending)
 				e.sdp[otherIdx].status.flags.Set(fSDPconfirmed | fSDPoffer)
@@ -527,22 +532,19 @@ func callEntryUpdateReqSDP(e *CallEntry, dir int, m *sipsp.PSIPMsg,
 		flags.Set(fSDPupdated)
 		sdpStats.cnts.Inc(sdpStats.updated)
 		sdpEv = EvSDPupdate
-		DBGsdp(e, dir, m, sdpIdx, "XXX: sdp update on request")
+		// DBGsdp(e, dir, m, sdpIdx, "XXX: sdp update on request")
 		// remove old RTP session if present
 		// -- handled in callEntryActiveteRTPSess(...) below
 	} else {
-		DBGsdp(e, dir, m, sdpIdx, "sdp update new session on request")
+		// DBGsdp(e, dir, m, sdpIdx, "sdp update new session on request")
 		sdpStats.cnts.Inc(sdpStats.newSess)
 		sdpStats.cnts.Inc(sdpStats.newSessReqs)
 	}
 	res := callEntryStoreSDP(e, m, sdpIdx, flags, cntNo, true)
 	// if the new SDP session is confirmed => add or update RTP session
-	DBG("XXX: RTP: callEntryStoreSDP returned %d sdpIdx %d new flags %d (%x: %s)\n",
-		res, sdpIdx, flags, uint(flags), flags)
 	if res >= 0 &&
 		e.sdp[0].status.flags.Test(fSDPconfirmed) &&
 		e.sdp[1].status.flags.Test(fSDPconfirmed) {
-		DBG("XXX: RTP: activating rtpsess\n")
 		res, _ = callEntryActivateRTPSess(e)
 	}
 	return res, sdpEv
@@ -750,13 +752,15 @@ func callEntryUpdateReplySDP(e *CallEntry, dir int, m *sipsp.PSIPMsg,
 		e.sdp[otherIdx] != nil && !e.sdp[otherIdx].IsEmpty() {
 		// confirm other side
 		if !e.sdp[otherIdx].status.flags.Test(fSDPconfirmed) {
-			if ignore {
-				DBGsdp(e, dir, m, sdpIdx,
-					"sdp update confirmed other on ignored reply")
-			} else {
-				DBGsdp(e, dir, m, sdpIdx,
-					"sdp update confirmed other on reply")
-			}
+			/*
+				if ignore {
+					DBGsdp(e, dir, m, sdpIdx,
+						"sdp update confirmed other on ignored reply")
+				} else {
+					DBGsdp(e, dir, m, sdpIdx,
+						"sdp update confirmed other on reply")
+				}
+			*/
 			e.sdp[otherIdx].status.flags.Clear(fSDPpending)
 			e.sdp[otherIdx].status.flags.Set(fSDPconfirmed)
 			sdpStats.cnts.Inc(sdpStats.confirmed)
@@ -765,7 +769,6 @@ func callEntryUpdateReplySDP(e *CallEntry, dir int, m *sipsp.PSIPMsg,
 				// if msg ignored, activate RTP here
 				if e.sdp[0].status.flags.Test(fSDPconfirmed) &&
 					e.sdp[1].status.flags.Test(fSDPconfirmed) {
-					DBG("XXX: RTP: activating rtpsess -- no sdp msg ignored\n")
 					res, _ = callEntryActivateRTPSess(e)
 				}
 			}
@@ -793,21 +796,18 @@ func callEntryUpdateReplySDP(e *CallEntry, dir int, m *sipsp.PSIPMsg,
 		flags.Set(fSDPupdated)
 		sdpStats.cnts.Inc(sdpStats.updated)
 		sdpEv = EvSDPupdate
-		DBGsdp(e, dir, m, sdpIdx, "XXX: sdp update on reply")
+		// DBGsdp(e, dir, m, sdpIdx, "XXX: sdp update on reply")
 		// remove old RTP session if present -> handled after callEnryStoreSDP
 	} else {
-		DBGsdp(e, dir, m, sdpIdx, "sdp update new session on reply")
+		// DBGsdp(e, dir, m, sdpIdx, "sdp update new session on reply")
 		sdpStats.cnts.Inc(sdpStats.newSess)
 		sdpStats.cnts.Inc(sdpStats.newSessRepls)
 	}
 	res = callEntryStoreSDP(e, m, sdpIdx, flags, cntNo, true)
 	// if the new SDP session is confirmed => add or update RTP session
-	DBG("XXX: RTP: callEntryStoreSDP returned %d sdpIdx %d new flags %x (%s)\n",
-		res, sdpIdx, flags, flags)
 	if res >= 0 &&
 		e.sdp[0].status.flags.Test(fSDPconfirmed) &&
 		e.sdp[1].status.flags.Test(fSDPconfirmed) {
-		DBG("XXX: RTP: activating rtpsess\n")
 		res, _ = callEntryActivateRTPSess(e)
 	}
 	return res, sdpEv

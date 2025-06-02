@@ -1080,9 +1080,6 @@ func Track(m *sipsp.PSIPMsg, n [2]NetInfo, f HandleEvF) bool {
 				}
 			}
 			if cEvHandler != nil {
-				if sdpEv != EvSDPNone {
-					DBG("XXX: sdpEv got %s (%d)\n", sdpEv, sdpEv)
-				}
 				if ev != EvNone || sdpEv != EvSDPNone {
 					// e.EndPoint[] is never changed after creation, so it
 					// can be safely copied without locking (cannot change)
@@ -1093,7 +1090,6 @@ func Track(m *sipsp.PSIPMsg, n [2]NetInfo, f HandleEvF) bool {
 					}
 					if sdpEv != EvSDPNone {
 						cEvHandler(sdpEv, e, src, dst)
-						DBG("XXX: ev handler for sdpEv %s (%d)\n", sdpEv, sdpEv)
 					}
 				}
 			}
