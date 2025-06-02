@@ -428,7 +428,6 @@ func (h *RTPStreamHash) ProcessPkt(dst, src NetInfo,
 		if rtpEntry != nil {
 			rtpSess := rtpEntry.RTPSession()
 			if len(dstCallid) != 0 && rtpSess != nil {
-				rtpSess.Ref()
 				/* if the stream is in the stream hash and the current
 				 * hash list is locked rs.ce cannot change under us
 				 * (is only set when creating a new rtp session, before
