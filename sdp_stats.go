@@ -47,6 +47,7 @@ type sdpStatsT struct {
 	reuseUpdFail   counters.Handle
 	reuseEmptyFail counters.Handle
 	updated        counters.Handle
+	sameSDP        counters.Handle
 
 	cloned      counters.Handle
 	cloneFail   counters.Handle
@@ -111,6 +112,8 @@ func (s *sdpStatsT) Init() bool {
 				" (too small)"},
 		{&s.updated, 0, nil, nil, "updated",
 			"number of updated SDP entries"},
+		{&s.sameSDP, 0, nil, nil, "same_sdp",
+			"number of update SDP attempts with the same content"},
 
 		{&s.cloned, 0, nil, nil, "cloned",
 			"SDP entries succesfully cloned during forking"},

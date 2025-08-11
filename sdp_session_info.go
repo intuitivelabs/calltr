@@ -7,6 +7,7 @@
 package calltr
 
 import (
+	"bytes"
 	"fmt"
 	"net"
 	"net/netip"
@@ -102,6 +103,21 @@ func (c ConnInfo) IsIP4() bool {
 
 func (c ConnInfo) IsIP6() bool {
 	return c.Flags&ConnInfoIP6f != 0
+}
+
+func (c ConnInfo) Eq(c2 *ConnInfo) bool {
+	if c.Flags != c2.Flags ||
+		c.AddrNo != c2.AddrNo {
+		return false
+	}
+	if !c.IsEmpty() {
+		n := 4
+		if c.IsIP6() {
+			n = 6
+		}
+		return bytes.Equal(c.IPAddr[:n], c2.IPAddr[:n])
+	}
+	return true
 }
 
 func ParseConnInfo(nettype, addrtype []byte,
@@ -281,6 +297,27 @@ func (m SDPmLine) String() string {
 		s += " " + strconv.Itoa(int(m.Formats[i]))
 	}
 	return s
+}
+
+func (m SDPmLine) Eq(m2 *SDPmLine) bool {
+	if m2 == nil {
+		return false
+	}
+	if m.Type != m2.Type ||
+		m.Proto != m2.Proto ||
+		m.Port != m2.Port ||
+		m.PortsNo != m2.PortsNo ||
+		m.FormatsNo != m2.FormatsNo {
+		return false
+	}
+	for i := uint8(0); i < m.FormatsNo; i++ {
+		if m.Formats[i] != m2.Formats[i] {
+			// formats must be in the same preference order if
+			// equal
+			return false
+		}
+	}
+	return true
 }
 
 // ParseSDPmLine parses the m-line parts (media, port, prange, protos
