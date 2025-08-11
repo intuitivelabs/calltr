@@ -7,8 +7,10 @@
 package calltr
 
 import (
+	"bytes"
 	"strconv"
 
+	"github.com/intuitivelabs/bytescase"
 	"github.com/intuitivelabs/sipsp"
 	"github.com/intuitivelabs/unsafeconv"
 	sdp "github.com/pion/sdp/v3"
@@ -486,4 +488,91 @@ func parseRTPMAPval(val string) (int, string, uint, uint8) {
 		return payload, name, clkRate, chs
 	}
 	return -1, "", 0, 0
+}
+
+// SDPSessInfoCmp compares one sdp description in SDPSessInfo format
+// to a sdp description in sdp.SessionDescription format
+// It returns 0 if the SDPs are the same.
+func SDPsessInfoCmp(sess *SDPsessInfo,
+	sesDesc *sdp.SessionDescription, flags int) int {
+	if sess == nil || sesDesc == nil {
+		return -1
+	}
+	// SDP protocol version
+	if sess.V != uint8(sesDesc.Version) {
+		return 1
+	}
+	// SDP o=
+	if sess.origin.SessId != sesDesc.Origin.SessionID ||
+		sess.origin.SessVer != sesDesc.Origin.SessionVersion ||
+		!bytes.Equal(sess.origin.Username.Get(sess.buf),
+			unsafeconv.Bytes(sesDesc.Origin.Username)) ||
+		!bytescase.CmpEq(sess.origin.NetType.Get(sess.buf),
+			unsafeconv.Bytes(sesDesc.Origin.NetworkType)) ||
+		!bytescase.CmpEq(sess.origin.AddrType.Get(sess.buf),
+			unsafeconv.Bytes(sesDesc.Origin.AddressType)) ||
+		!bytescase.CmpEq(sess.origin.Addr.Get(sess.buf),
+			unsafeconv.Bytes(sesDesc.Origin.UnicastAddress)) {
+		return 1
+	}
+
+	// SDP c= line top-level - skip comparing (use it only if an m section
+	// does not have a c)
+
+	// m lines
+	if sess.MSections.no != uint8(len(sesDesc.MediaDescriptions)) {
+		return 1 // different number of m-lines/sections
+	}
+	for i, mdesc := range sesDesc.MediaDescriptions {
+		md1, ok1 := sess.MSections.GetMDesc(i, sess.buf)
+		if mdesc == nil {
+			if ok1 {
+				return 1 // m-line present in sess but not in sesDesc
+			}
+			continue
+		}
+		if !ok1 {
+			return 1 // missing or bad m-line in sess
+		}
+		ok2, mLine2 := ParseSDPmLine(
+			mdesc.MediaName.Media,
+			mdesc.MediaName.Port.Value,
+			mdesc.MediaName.Port.Range,
+			mdesc.MediaName.Protos,
+			mdesc.MediaName.Formats)
+		if !ok2 {
+			return 1 // bad m-line in sesDesc
+		}
+		if !md1.MLine.Eq(&mLine2) {
+			return 1 // m line does not match
+		}
+		// check m-section c line
+		c1 := md1.C
+		if c1.IsEmpty() {
+			c1 = sess.C
+		}
+		mdescC := mdesc.ConnectionInformation
+		if mdescC == nil {
+			mdescC = sesDesc.ConnectionInformation
+		}
+		if c1.IsEmpty() && mdescC == nil {
+			continue
+		} else if c1.IsEmpty() || mdescC == nil {
+			// one is empty. but not both of them =>
+			// c line missmatch (present in one and not in the other)
+			return 1
+		}
+		c2 := ParseConnInfo(
+			unsafeconv.Bytes(mdescC.NetworkType),
+			unsafeconv.Bytes(mdescC.AddressType),
+			mdescC.Address.Address,
+			mdescC.Address.TTL,
+			mdescC.Address.Range)
+		if !c1.Eq(&c2) {
+			return 1 // c lines mismatch
+		}
+		// TODO: check m-section rtpmap attrs
+	}
+
+	return 0
 }

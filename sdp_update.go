@@ -438,8 +438,7 @@ func callEntryIgnoreReqSDP(e *CallEntry,
 // error and an sdp event.
 // Error codes: -1 parse error, -2 buffer full, -3 other error, -4 alloc error.
 // WARNING: it should be called before e.State is updated with the new
-//
-//	state resulting from processing m
+// state resulting from processing m
 func callEntryUpdateReqSDP(e *CallEntry, dir int, m *sipsp.PSIPMsg,
 	sdpIdx int) (int, EventType) {
 
@@ -523,9 +522,24 @@ func callEntryUpdateReqSDP(e *CallEntry, dir int, m *sipsp.PSIPMsg,
 
 	cntNo := uint32(0)
 	sdpEv := EvSDPNone
+	// at this point the message sdp is either a good update candidate
+	// or is the first sdp seen => we cannot delay anylonger the sdp
+	// parsing
+	var sesDesc sdp.SessionDescription
+	if err := sessionDescriptionParseMsg(&sesDesc, m); err != nil {
+		ERR("sdp parsing failed: %v for %q\n",
+			err, m.Body.Get(m.Buf))
+		sdpStats.cnts.Inc(sdpStats.parseErr)
+		return int(ErrSDPparse), sdpEv
+	}
 	if e.sdp[sdpIdx] != nil && !e.sdp[sdpIdx].IsEmpty() {
 		// update previous sdp
-		// TODO: check if same, otherwise counter
+		// check if same: SDPSessInfoCmp, otherwise counter
+		if SDPsessInfoCmp(e.sdp[sdpIdx], &sesDesc, 0) == 0 {
+			// same sdp in both messages
+			sdpStats.cnts.Inc(sdpStats.sameSDP)
+			return 0, EvSDPNone // NOP
+		}
 		cntNo = e.sdp[sdpIdx].status.Cnt + 1
 		// FreeSDPsessInfo(e.sdp[sdpIdx]) // handled in callEnryStoreSDP
 		// e.sdp[sdpIdx] = nil           // as above
@@ -540,7 +554,7 @@ func callEntryUpdateReqSDP(e *CallEntry, dir int, m *sipsp.PSIPMsg,
 		sdpStats.cnts.Inc(sdpStats.newSess)
 		sdpStats.cnts.Inc(sdpStats.newSessReqs)
 	}
-	res := callEntryStoreSDP(e, m, sdpIdx, flags, cntNo, true)
+	res := callEntryStoreSDP(e, &sesDesc, m, sdpIdx, flags, cntNo, true)
 	// if the new SDP session is confirmed => add or update RTP session
 	if res >= 0 &&
 		e.sdp[0].status.flags.Test(fSDPconfirmed) &&
@@ -787,9 +801,24 @@ func callEntryUpdateReplySDP(e *CallEntry, dir int, m *sipsp.PSIPMsg,
 	}
 	cntNo := uint32(0)
 	sdpEv := EvSDPNone
+	// at this point the message sdp is either a good update candidate
+	// or is the first sdp seen => we cannot delay anylonger the sdp
+	// parsing
+	var sesDesc sdp.SessionDescription
+	if err := sessionDescriptionParseMsg(&sesDesc, m); err != nil {
+		ERR("sdp parsing failed: %v for %q\n",
+			err, m.Body.Get(m.Buf))
+		sdpStats.cnts.Inc(sdpStats.parseErr)
+		return int(ErrSDPparse), sdpEv
+	}
 	if e.sdp[sdpIdx] != nil && !e.sdp[sdpIdx].IsEmpty() {
 		// update previous sdp
-		// TODO: check if same, otherwise counter
+		// check if same: SDPSessInfoCmp, otherwise counter
+		if SDPsessInfoCmp(e.sdp[sdpIdx], &sesDesc, 0) == 0 {
+			// same sdp in both messages
+			sdpStats.cnts.Inc(sdpStats.sameSDP)
+			return 0, EvSDPNone // NOP
+		}
 		cntNo = e.sdp[sdpIdx].status.Cnt + 1
 		// FreeSDPsessInfo(e.sdp[sdpIdx]) // handled in callEnryStoreSDP
 		// e.sdp[sdpIdx] = nil           // as above
@@ -803,7 +832,7 @@ func callEntryUpdateReplySDP(e *CallEntry, dir int, m *sipsp.PSIPMsg,
 		sdpStats.cnts.Inc(sdpStats.newSess)
 		sdpStats.cnts.Inc(sdpStats.newSessRepls)
 	}
-	res = callEntryStoreSDP(e, m, sdpIdx, flags, cntNo, true)
+	res = callEntryStoreSDP(e, &sesDesc, m, sdpIdx, flags, cntNo, true)
 	// if the new SDP session is confirmed => add or update RTP session
 	if res >= 0 &&
 		e.sdp[0].status.flags.Test(fSDPconfirmed) &&
@@ -827,19 +856,13 @@ func callEntryUpdateReplySDP(e *CallEntry, dir int, m *sipsp.PSIPMsg,
 // It returns the number of extra bytes allocate/used on success or < 0 on
 // error.
 // Error codes: -1 parse error, -2 buffer full, -3 other error, -4 alloc error.
-func callEntryStoreSDP(e *CallEntry, m *sipsp.PSIPMsg, sdpIdx int,
+func callEntryStoreSDP(e *CallEntry, sesDesc *sdp.SessionDescription,
+	m *sipsp.PSIPMsg, sdpIdx int,
 	flags SDPinfoFlags, updNo uint32, inPlaceUpdate bool) int {
 
-	var sesDesc sdp.SessionDescription
 	var sess *SDPsessInfo
 	var sessReused bool
-	if err := sessionDescriptionParseMsg(&sesDesc, m); err != nil {
-		ERR("sdp parsing failed: %v for %q\n",
-			err, m.Body.Get(m.Buf))
-		sdpStats.cnts.Inc(sdpStats.parseErr)
-		return int(ErrSDPparse)
-	}
-	extraSz := SDSsessInfoReservedSize(&sesDesc)
+	extraSz := SDSsessInfoReservedSize(sesDesc)
 	if extraSz < 0 || extraSz > 32768 {
 		ERR("invalid sdp extra size needed: %d for %q\n",
 			extraSz, m.Body.Get(m.Buf))
@@ -886,7 +909,7 @@ func callEntryStoreSDP(e *CallEntry, m *sipsp.PSIPMsg, sdpIdx int,
 			return int(ErrSDPsessAlloc)
 		}
 	}
-	n := SDPsessInfoStore(sess, sess.buf, 0, extraSz, &sesDesc)
+	n := SDPsessInfoStore(sess, sess.buf, 0, extraSz, sesDesc)
 	if n < 0 {
 		ERR("failed to store sdp session, code: %d for %q\n",
 			n, m.Body.Get(m.Buf))
