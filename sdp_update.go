@@ -477,7 +477,8 @@ func callEntryUpdateReqSDP(e *CallEntry, dir int, m *sipsp.PSIPMsg,
 				e.sdp[otherIdx].status.flags.Set(fSDPconfirmed | fSDPoffer)
 				sdpStats.cnts.Inc(sdpStats.confirmed)
 				// confirmed "new" sdp -> add RTP session
-				if e.sdp[0].status.flags.Test(fSDPconfirmed) &&
+				if e.sdp[0] != nil && e.sdp[1] != nil &&
+					e.sdp[0].status.flags.Test(fSDPconfirmed) &&
 					e.sdp[1].status.flags.Test(fSDPconfirmed) {
 					res, _ = callEntryActivateRTPSess(e)
 				}
@@ -557,7 +558,7 @@ func callEntryUpdateReqSDP(e *CallEntry, dir int, m *sipsp.PSIPMsg,
 	}
 	res := callEntryStoreSDP(e, &sesDesc, m, sdpIdx, flags, cntNo, true)
 	// if the new SDP session is confirmed => add or update RTP session
-	if res >= 0 &&
+	if res >= 0 && e.sdp[0] != nil && e.sdp[1] != nil &&
 		e.sdp[0].status.flags.Test(fSDPconfirmed) &&
 		e.sdp[1].status.flags.Test(fSDPconfirmed) {
 		res, _ = callEntryActivateRTPSess(e)
@@ -782,7 +783,8 @@ func callEntryUpdateReplySDP(e *CallEntry, dir int, m *sipsp.PSIPMsg,
 			// confirmed "new" sdp -> add RTP session
 			if ignore {
 				// if msg ignored, activate RTP here
-				if e.sdp[0].status.flags.Test(fSDPconfirmed) &&
+				if e.sdp[0] != nil && e.sdp[1] != nil &&
+					e.sdp[0].status.flags.Test(fSDPconfirmed) &&
 					e.sdp[1].status.flags.Test(fSDPconfirmed) {
 					res, _ = callEntryActivateRTPSess(e)
 				}
@@ -835,7 +837,7 @@ func callEntryUpdateReplySDP(e *CallEntry, dir int, m *sipsp.PSIPMsg,
 	}
 	res = callEntryStoreSDP(e, &sesDesc, m, sdpIdx, flags, cntNo, true)
 	// if the new SDP session is confirmed => add or update RTP session
-	if res >= 0 &&
+	if res >= 0 && e.sdp[0] != nil && e.sdp[1] != nil &&
 		e.sdp[0].status.flags.Test(fSDPconfirmed) &&
 		e.sdp[1].status.flags.Test(fSDPconfirmed) {
 		res, _ = callEntryActivateRTPSess(e)
