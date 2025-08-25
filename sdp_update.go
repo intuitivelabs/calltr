@@ -158,13 +158,13 @@ func clearSDP(e *CallEntry, idx int) {
 // callEntryUpdateSDP updates the SDP in the CallEntry with the one from
 // the sip smg.
 // It returns the number of extra bytes allocate/used on success or < 0 on
-// error and an sdp event.
+// error, the numnber of rtp streams added and an sdp event.
 // Error codes: -1 parse error, -2 buffer full, -3 other error, -4 alloc error.
 // WARNING: it should be called before e.State is updated with the new
 //
 //	state resulting from processing m
 func callEntryUpdateSDP(e *CallEntry, dir int,
-	m *sipsp.PSIPMsg) (int, EventType) {
+	m *sipsp.PSIPMsg) (int, int, EventType) {
 	/*
 		if !shouldUpdateSDP(m, dir) {
 			return 0
@@ -435,13 +435,14 @@ func callEntryIgnoreReqSDP(e *CallEntry,
 // request m.
 // sdpIdx is the target SDP index in the CallEntry (0 caller, 1 callee)
 // It returns the number of extra bytes allocated/used on success or < 0 on
-// error and an sdp event.
+// error, the number of added rtp streams and an sdp event.
 // Error codes: -1 parse error, -2 buffer full, -3 other error, -4 alloc error.
 // WARNING: it should be called before e.State is updated with the new
 // state resulting from processing m
 func callEntryUpdateReqSDP(e *CallEntry, dir int, m *sipsp.PSIPMsg,
-	sdpIdx int) (int, EventType) {
+	sdpIdx int) (int, int, EventType) {
 
+	var addedStreams int
 	sdpStats.cnts.Inc(sdpStats.msgs)
 	sdpStats.cnts.Inc(sdpStats.reqs)
 	if !shouldUpdateReqSDP(m, dir) {
@@ -454,7 +455,7 @@ func callEntryUpdateReqSDP(e *CallEntry, dir int, m *sipsp.PSIPMsg,
 		*/
 		sdpStats.cnts.Inc(sdpStats.ignored)
 		sdpStats.cnts.Inc(sdpStats.ignoredReqs)
-		return 0, EvSDPNone
+		return 0, addedStreams, EvSDPNone
 	}
 	/*
 		DBG("sdp update: yes for %s callid %q cseq %d method %s\n",
@@ -479,13 +480,18 @@ func callEntryUpdateReqSDP(e *CallEntry, dir int, m *sipsp.PSIPMsg,
 				if e.sdp[0] != nil && e.sdp[1] != nil &&
 					e.sdp[0].status.flags.Test(fSDPconfirmed) &&
 					e.sdp[1].status.flags.Test(fSDPconfirmed) {
-					res, _ = callEntryActivateRTPSess(e)
+					var errC int
+					errC, addedStreams = callEntryActivateRTPSess(e)
+					if errC < 0 {
+						// failed to activare or add rtp streams
+						res = errC
+					}
 				}
 			}
 		}
 		sdpStats.cnts.Inc(sdpStats.ignored)
 		sdpStats.cnts.Inc(sdpStats.ignoredReqs)
-		return res, EvSDPNone
+		return res, addedStreams, EvSDPNone
 	}
 
 	if flags.Test(fSDPanswer) {
@@ -531,7 +537,7 @@ func callEntryUpdateReqSDP(e *CallEntry, dir int, m *sipsp.PSIPMsg,
 		ERR("sdp parsing failed: %v for %q\n",
 			err, m.Body.Get(m.Buf))
 		sdpStats.cnts.Inc(sdpStats.parseErr)
-		return int(ErrSDPparse), sdpEv
+		return int(ErrSDPparse), 0, sdpEv
 	}
 	if e.sdp[sdpIdx] != nil && !e.sdp[sdpIdx].IsEmpty() {
 		// update previous sdp
@@ -539,7 +545,7 @@ func callEntryUpdateReqSDP(e *CallEntry, dir int, m *sipsp.PSIPMsg,
 		if SDPsessInfoCmp(e.sdp[sdpIdx], &sesDesc, 0) == 0 {
 			// same sdp in both messages
 			sdpStats.cnts.Inc(sdpStats.sameSDP)
-			return 0, EvSDPNone // NOP
+			return 0, 0, EvSDPNone // NOP
 		}
 		cntNo = e.sdp[sdpIdx].status.Cnt + 1
 		// FreeSDPsessInfo(e.sdp[sdpIdx]) // handled in callEnryStoreSDP
@@ -560,9 +566,14 @@ func callEntryUpdateReqSDP(e *CallEntry, dir int, m *sipsp.PSIPMsg,
 	if res >= 0 && e.sdp[0] != nil && e.sdp[1] != nil &&
 		e.sdp[0].status.flags.Test(fSDPconfirmed) &&
 		e.sdp[1].status.flags.Test(fSDPconfirmed) {
-		res, _ = callEntryActivateRTPSess(e)
+		var errC int
+		errC, addedStreams = callEntryActivateRTPSess(e)
+		if errC < 0 {
+			// failed to activare or add rtp streams
+			res = errC
+		}
 	}
-	return res, sdpEv
+	return res, addedStreams, sdpEv
 }
 
 // callEntryIgnoreReplySDP returns true if the SDP from a reply
@@ -732,15 +743,16 @@ func DBGsdp(e *CallEntry, dir int, m *sipsp.PSIPMsg, sdpIdx int,
 // request m.
 // sdpIdx is the target SDP index in the CallEntry (0 caller, 1 callee)
 // It returns the number of extra bytes allocated/used on success or < 0 on
-// error and a sdp event.
+// error, the number of added rtp streams and a sdp event.
 // Error codes: -1 parse error, -2 buffer full, -3 other error, -4 alloc error.
 // WARNING: it should be called before e.State is updated with the new
 //
 //	state resulting from processing m
 func callEntryUpdateReplySDP(e *CallEntry, dir int, m *sipsp.PSIPMsg,
-	sdpIdx int) (int, EventType) {
+	sdpIdx int) (int, int, EventType) {
 	var res int
 
+	var addedStreams int
 	sdpStats.cnts.Inc(sdpStats.msgs)
 	sdpStats.cnts.Inc(sdpStats.repls)
 
@@ -752,7 +764,7 @@ func callEntryUpdateReplySDP(e *CallEntry, dir int, m *sipsp.PSIPMsg,
 		*/
 		sdpStats.cnts.Inc(sdpStats.ignored)
 		sdpStats.cnts.Inc(sdpStats.ignoredRepls)
-		return res, EvSDPNone
+		return res, addedStreams, EvSDPNone
 	}
 	/*
 		DBG("sdp update: yes for %d callid %q cseq %d method %s\n",
@@ -785,7 +797,12 @@ func callEntryUpdateReplySDP(e *CallEntry, dir int, m *sipsp.PSIPMsg,
 				if e.sdp[0] != nil && e.sdp[1] != nil &&
 					e.sdp[0].status.flags.Test(fSDPconfirmed) &&
 					e.sdp[1].status.flags.Test(fSDPconfirmed) {
-					res, _ = callEntryActivateRTPSess(e)
+					var errC int
+					errC, addedStreams = callEntryActivateRTPSess(e)
+					if errC < 0 {
+						// failed to activare or add rtp streams
+						res = errC
+					}
 				}
 			}
 		}
@@ -794,7 +811,7 @@ func callEntryUpdateReplySDP(e *CallEntry, dir int, m *sipsp.PSIPMsg,
 	if ignore {
 		sdpStats.cnts.Inc(sdpStats.ignored)
 		sdpStats.cnts.Inc(sdpStats.ignoredRepls)
-		return 0, EvSDPNone
+		return res, addedStreams, EvSDPNone
 	}
 	if flags.Test(fSDPanswer) {
 		sdpStats.cnts.Inc(sdpStats.answRepl)
@@ -811,7 +828,7 @@ func callEntryUpdateReplySDP(e *CallEntry, dir int, m *sipsp.PSIPMsg,
 		ERR("sdp parsing failed: %v for %q\n",
 			err, m.Body.Get(m.Buf))
 		sdpStats.cnts.Inc(sdpStats.parseErr)
-		return int(ErrSDPparse), sdpEv
+		return int(ErrSDPparse), 0, sdpEv
 	}
 	if e.sdp[sdpIdx] != nil && !e.sdp[sdpIdx].IsEmpty() {
 		// update previous sdp
@@ -819,7 +836,7 @@ func callEntryUpdateReplySDP(e *CallEntry, dir int, m *sipsp.PSIPMsg,
 		if SDPsessInfoCmp(e.sdp[sdpIdx], &sesDesc, 0) == 0 {
 			// same sdp in both messages
 			sdpStats.cnts.Inc(sdpStats.sameSDP)
-			return 0, EvSDPNone // NOP
+			return 0, 0, EvSDPNone // NOP
 		}
 		cntNo = e.sdp[sdpIdx].status.Cnt + 1
 		// FreeSDPsessInfo(e.sdp[sdpIdx]) // handled in callEnryStoreSDP
@@ -839,21 +856,24 @@ func callEntryUpdateReplySDP(e *CallEntry, dir int, m *sipsp.PSIPMsg,
 	if res >= 0 && e.sdp[0] != nil && e.sdp[1] != nil &&
 		e.sdp[0].status.flags.Test(fSDPconfirmed) &&
 		e.sdp[1].status.flags.Test(fSDPconfirmed) {
-		res, _ = callEntryActivateRTPSess(e)
+		var errC int
+		errC, addedStreams = callEntryActivateRTPSess(e)
+		if errC < 0 {
+			// failed to activare or add rtp streams
+			res = errC
+		}
 	}
-	return res, sdpEv
+	return res, addedStreams, sdpEv
 }
 
-// callEntryStoreSDP parses the SDP from m and store it in the CallEntry e.
+// callEntryStoreSDP parses the SDP from m and stores it in the CallEntry e.
 // dir is the direction of the "transaction initiator": it's 0 for requests
 // from the caller and  replies from the callee (totag matches exactly) and
 // 1 for requests from the callee and replies from the caller (totag matches
 // fromtag).
 // updNo is the sdp update number (e.g. 1 for the initial message)
 // inPlaceUpdate if true forces callEntryStoreSDP to try to reuse the
-//
-//	existing e.sdp[sdpIdx]m if non nill and it has a big enough buffer
-//
+// existing e.sdp[sdpIdx] if non null and it has a big enough buffer
 // to store the new sdp.
 // It returns the number of extra bytes allocate/used on success or < 0 on
 // error.

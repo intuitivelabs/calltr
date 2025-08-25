@@ -128,13 +128,16 @@ func updateStateReq(e *CallEntry, m *sipsp.PSIPMsg, dir int) (CallState, Timeout
 		mmethod == sipsp.MUpdate /* ignore UPDATEs */ {
 		// ignore PRACKs and UPDATEs for call entry state updates
 		// but not for SDP
-		n, sdpEv := callEntryUpdateReqSDP(e, dir, m, getSDPidx(dir, m))
+		n, sno, sdpEv := callEntryUpdateReqSDP(e, dir, m, getSDPidx(dir, m))
 		if n < 0 {
 			ERR("failed to update sdp session, code: %d (%s) for %q\n",
 				n, ErrorSDP(n), m.Body.Get(m.Buf))
 			sdpStats.cnts.Inc(sdpStats.updReqFail)
 		} else {
-			DBG("%d bytes used for sdp for call entry %p\n", n, e)
+			if sdpEvent != EvSDPNone {
+				DBG("%d new rtp streams added and %d bytes used for sdp"+
+					" for call entry %p\n", sno, n, e)
+			}
 			sdpEvent = sdpEv
 		}
 		goto retr
@@ -317,14 +320,17 @@ end:
 	//       immediately clear/free the RTP Session (removing the streams
 	//       so that new can be added if fork or new call) ?
 	//        Alternative on event == EvCallEnd or EvCallAttempt
-	if n, sdpEv := callEntryUpdateReqSDP(e, dir, m, getSDPidx(dir, m)); n < 0 {
+	if n, sno, sdpEv := callEntryUpdateReqSDP(e, dir, m, getSDPidx(dir, m)); n < 0 {
 		ERR("failed to update sdp session, code: %d (%s) sdpEv %s (%d)"+
 			" for %q\n",
 			n, ErrorSDP(n), sdpEv, sdpEv, m.Body.Get(m.Buf))
 		sdpStats.cnts.Inc(sdpStats.updReqFail)
 	} else {
-		DBG("%d bytes used for sdp for call entry %p on %s (%d)\n",
-			n, e, mmethod, mmethod)
+		if sdpEv != EvSDPNone {
+			DBG("%d rtp streams added and %d bytes used for sdp for"+
+				" call entry %p on %s (%d)\n",
+				sno, n, e, mmethod, mmethod)
+		}
 		sdpEvent = sdpEv
 	}
 	e.CSeq[dir] = mcseq
@@ -399,14 +405,17 @@ func updateStateRepl(e *CallEntry, m *sipsp.PSIPMsg, dir int) (CallState, Timeou
 		// ignore PRACK, UPDATE & ACK for call entry state updates, but not
 		// for SDP
 		//  SDP update state
-		n, sdpEv := callEntryUpdateReplySDP(e, dir, m, getSDPidx(dir, m))
+		n, sno, sdpEv := callEntryUpdateReplySDP(e, dir, m, getSDPidx(dir, m))
 		if n < 0 {
 			ERR("failed to update sdp on reply, code: %d (%s) sdpEv %s (%d) "+
 				"for %q\n",
 				n, ErrorSDP(n), sdpEv, sdpEv, m.Body.Get(m.Buf))
 			sdpStats.cnts.Inc(sdpStats.updReplFail)
 		} else {
-			DBG("%d bytes used for sdp for call entry on reply %p\n", n, e)
+			if sdpEv != EvSDPNone {
+				DBG("%d rtp streams and %d bytes used for sdp for call entry"+
+					" on reply %p\n", sno, n, e)
+			}
 			sdpEvent = sdpEv
 		}
 		goto retr // retransmission
@@ -629,13 +638,16 @@ func updateStateRepl(e *CallEntry, m *sipsp.PSIPMsg, dir int) (CallState, Timeou
 	//       immediately clear/free the RTP Session (removing the streams
 	//       so that new can be added if fork or new call) ?
 	//        Alternative on event == EvCallEnd or EvCallAttempt
-	if n, sdpE := callEntryUpdateReplySDP(e, dir, m, getSDPidx(dir, m)); n < 0 {
+	if n, sno, sdpE := callEntryUpdateReplySDP(e, dir, m, getSDPidx(dir, m)); n < 0 {
 		ERR("failed to update sdp on reply, code: %d (%s) for %q\n",
 			n, ErrorSDP(n), m.Body.Get(m.Buf))
 		sdpStats.cnts.Inc(sdpStats.updReplFail)
 	} else {
-		DBG("%d bytes used for sdp for call entry on reply %d (%p)\n",
-			n, mstatus, e)
+		if sdpE != EvSDPNone {
+			DBG("%d rtp streams added and  %d bytes used for sdp for call entry"+
+				" on reply %d (%p)\n",
+				sno, n, mstatus, e)
+		}
 		sdpEvent = sdpE
 	}
 	e.ReplCSeq[dir] = mcseq
