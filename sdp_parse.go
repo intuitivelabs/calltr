@@ -571,8 +571,37 @@ func SDPsessInfoCmp(sess *SDPsessInfo,
 		if !c1.Eq(&c2) {
 			return 1 // c lines mismatch
 		}
-		// TODO: check m-section rtpmap attrs
-	}
+		// check m-section rtpmap attrs
+		// (check if same payload and clock rate present for the stored
+		//  sdp m-section; ignore channels and payload name for now)
+		newFormatsNo := 0
+		for _, a := range mdesc.Attributes {
+			if a.Key == "rtpmap" {
+				newFormatsNo++
+				pt, _, clkRate, _ := parseRTPMAPval(a.Value)
+				if pt >= 0 {
+					payloadFound := false
+					for j := 0; j < int(md1.MLine.FormatsNo); j++ {
+						if md1.MLine.Formats[j] == uint8(pt) &&
+							md1.ClkRates[j] == clkRate {
+							payloadFound = true
+							break
+						}
+					}
+					if !payloadFound {
+						DBG("new sdp mismatch: format %q new\n",
+							a.Value)
+						return 1 // rtpmap payload clkrate mismatch
+					}
+				}
+			}
+		}
+		if newFormatsNo != int(md1.MLine.FormatsNo) {
+			DBG("new sdp mismatch: different number of rtpmap formats %d/%d\n",
+				newFormatsNo, int(md1.MLine.FormatsNo))
+			return 1 // different format numbers int the two SDPs
+		}
+	} // m-sections for
 
 	return 0
 }
