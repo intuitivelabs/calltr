@@ -186,7 +186,7 @@ func SDPsessInfoStore(sess *SDPsessInfo, dstBuf []byte,
 		// look for rtpmap attrs
 		for _, a := range mdesc.Attributes {
 			if a.Key == "rtpmap" {
-				pt, ptName, clkRate, chs := parseRTPMAPval(a.Value)
+				pt, _ /*ptName*/, clkRate, _ /*chs*/ := parseRTPMAPval(a.Value)
 				if pt >= 0 {
 					j := uint8(0)
 					for ; j < md.MLine.FormatsNo; j++ {
@@ -195,14 +195,18 @@ func SDPsessInfoStore(sess *SDPsessInfo, dstBuf []byte,
 							break
 						}
 					}
-					if j >= md.MLine.FormatsNo {
-						ERR("found rtpmap:%d %s/%d[/%d] (%q) with no "+
-							"corresponding payload in the mline (%q)\n",
-							pt, ptName, clkRate, chs, a.Value,
-							mdesc.MediaName)
-						ERR("payloads no: %d j= %d mline: %q\n",
-							md.MLine.FormatsNo, j, md.MLine.String())
-					}
+					// some UAs add rtpmap for formats not present in
+					// the m-line
+					/*
+						if j >= md.MLine.FormatsNo {
+							DBG("XXX: found rtpmap:%d %s/%d[/%d] (%q) with no "+
+								"corresponding payload in the mline (%q)\n",
+								pt, ptName, clkRate, chs, a.Value,
+								mdesc.MediaName)
+							DBG("XXX: payloads no: %d j= %d mline: %q\n",
+								md.MLine.FormatsNo, j, md.MLine.String())
+						}
+					*/
 				}
 			}
 		}
@@ -574,32 +578,25 @@ func SDPsessInfoCmp(sess *SDPsessInfo,
 		// check m-section rtpmap attrs
 		// (check if same payload and clock rate present for the stored
 		//  sdp m-section; ignore channels and payload name for now)
-		newFormatsNo := 0
 		for _, a := range mdesc.Attributes {
 			if a.Key == "rtpmap" {
-				newFormatsNo++
 				pt, _, clkRate, _ := parseRTPMAPval(a.Value)
 				if pt >= 0 {
-					payloadFound := false
 					for j := 0; j < int(md1.MLine.FormatsNo); j++ {
-						if md1.MLine.Formats[j] == uint8(pt) &&
-							md1.ClkRates[j] == clkRate {
-							payloadFound = true
-							break
+						if md1.MLine.Formats[j] == uint8(pt) {
+							if md1.ClkRates[j] == clkRate {
+								break
+							} else {
+								return 1 // rtpmap clkrate mismatch
+							}
 						}
 					}
-					if !payloadFound {
-						DBG("new sdp mismatch: format %q new\n",
-							a.Value)
-						return 1 // rtpmap payload clkrate mismatch
-					}
+					/* if payload type in the rtpmap attr was not found
+					   among the sdp m-line formats, ignore it
+					   (some UAs send extra rtpmap lines for unused payload
+					    types) */
 				}
 			}
-		}
-		if newFormatsNo != int(md1.MLine.FormatsNo) {
-			DBG("new sdp mismatch: different number of rtpmap formats %d/%d\n",
-				newFormatsNo, int(md1.MLine.FormatsNo))
-			return 1 // different format numbers int the two SDPs
 		}
 	} // m-sections for
 
