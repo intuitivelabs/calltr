@@ -43,7 +43,7 @@ type RTPStreamData struct {
 	Src        NetInfo // expected source (assuming symmetric RTP)
 	Src2       NetInfo // discovered source
 	Stats      PktStats
-	Flags      RTPStreamFlags
+	Flags      RTPStreamFlags // TODO: atomic type (dbg read & set race)
 	Type       MediaType
 	Proto      MediaProto
 	PayloadsNo uint8                // number of possible payloads
