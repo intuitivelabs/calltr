@@ -184,16 +184,19 @@ func (r *RTPSession) rmStreamEntry(e *RTPStreamEntry, h *RTPStreamHash) bool {
 // add a specific rtp stream
 func (r *RTPSession) addStreamEntry(e *RTPStreamEntry, h *RTPStreamHash) bool {
 	if e.Stream.Flags&RTPSDisabledF != 0 {
-		return false // stream disabled
+		e.Stream.Flags |= RTPRemovedF // mark it as not-in-hash
+		return false                  // stream disabled
 	}
 	if r.unlinked.Load() != 0 {
 		// don't add any stream if in the process of being destroyed
+		e.Stream.Flags |= RTPRemovedF // mark it as not-in-hash
 		return false
 	}
 	if e.hashNo.Load() != RTPHashNone || !e.Detached() {
 		BUG("trying to add entry %d side %d flags %d detached %d "+
 			" hash: %d with wrong hash or not detached\n",
 			e.mline, e.side, e.Stream.Flags, e.Detached(), e.hashNo.Load())
+		e.Stream.Flags |= RTPRemovedF // mark it as not-in-hash
 		return false
 	}
 	e.Stream.Stats.Init()
