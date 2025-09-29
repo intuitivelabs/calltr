@@ -39,6 +39,7 @@ type Config struct {
 	RegDelDelay       int32  // delay in generating EvRegDel in s
 	ContactIgnorePort bool   // ignore port when comparing contacts (but not in AORs)
 	SDP               bool   // keep track of SDP per call
+	RTP               bool   // keep track of RTP sessions
 	Mem               MemConfig
 	Dbg               DbgFlags
 	// per state timeout in s, used at runtime

@@ -400,6 +400,10 @@ func callEntryActivateRTPSess(e *CallEntry) (int, int) {
 	// not e.Unref() here since we will create a new rtpSession
 	// and reuse the ref (minor optimisation)
 	callEntryClearRTPSess(e, false)
+	if !GetCfg().RTP {
+		// if RTP support is disable, return 0 activated rtp streams
+		return 0, 0
+	}
 
 	e.rtpSession = NewRTPSession(e.sdp)
 	/*
