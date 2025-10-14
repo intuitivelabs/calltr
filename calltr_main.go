@@ -1097,7 +1097,14 @@ errorLocked:
 	return nil, CallErrMatch, 0, EvNone, EvSDPNone
 }
 
-func Track(m *sipsp.PSIPMsg, n [2]NetInfo, f HandleEvF) bool {
+// Track will start calll-tracking the passed message.
+// It returns true on success and whether or not the message matched an existing call:
+//
+//	CallNoMatch (new call-entry was created),
+//	CallPartialMatch (partial match on an existing call, possible fork/branch created),
+//	CallCallIDMatch  (only callid matched, possible fork/branch created) or
+//	CallFullMatch (message fully matched an existing call)
+func Track(m *sipsp.PSIPMsg, n [2]NetInfo, f HandleEvF) (bool, CallMatchType) {
 	var evd *EventData
 	var sdpEvd *EventData
 	if f != nil { // TODO: callbacks via f param are obsolete (slow)
@@ -1155,7 +1162,7 @@ func Track(m *sipsp.PSIPMsg, n [2]NetInfo, f HandleEvF) bool {
 			WARN("XXX: ev event not empty bug ignored e == nil: %s (%d) match %d\n", ev, ev, match)
 		}
 	}
-	return match != CallErrMatch
+	return match != CallErrMatch, match
 }
 
 // updateRegCache creates/deletes RegCache binding entries in function of
