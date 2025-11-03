@@ -169,31 +169,8 @@ func (s *PktStats) AddRTPpkt(pkt []byte, ts timestamp.TS,
 		timestamp.AtomicCompareAndSwap(&s.RTPrcvdTS0, timestamp.Zero(), ts)
 		s.RTPpktTS0.CompareAndSwap(0, uint32(rtph.TS))
 		s.RTPSeqNo0.CompareAndSwap(0, uint32(rtph.SeqNo))
-		sampleRate := -1
-		for i, pt := range payloadTypes {
-			if RTPcodec(pt) == rtph.PayloadType {
-				sampleRate = int(clkRates[i])
-				break
-			}
-		}
-		if sampleRate <= 0 {
-			// sampleRate not found
-			sampleRate = int(RTPSampleRate(rtph.PayloadType))
-			if sampleRate == 0 {
-				switch mediaType {
-				case MediaTypeAudio:
-					sampleRate = 8000 // best guesss
-				case MediaTypeVideo:
-					sampleRate = 90000
-				default:
-					sampleRate = 0
-				}
-				WARN("could not find sample rate for RTP payload %d,"+
-					" guessing %d\n",
-					rtph.PayloadType, sampleRate)
-			}
-		}
-		s.RTPSampleRate = uint32(sampleRate)
+		s.RTPSampleRate = FindSampleRate(rtph.PayloadType, mediaType,
+			payloadTypes, clkRates)
 		s.RTPPayloadType = rtph.PayloadType
 		s.RTPssrc = rtph.SSRC
 	} else {

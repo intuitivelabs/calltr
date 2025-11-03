@@ -462,6 +462,77 @@ func (h *RTPStreamHash) ProcessPkt(dst, src NetInfo,
 	return match, copied, origSz
 }
 
+// SetStats sets the statistics for the matching rtp stream.
+// It's purpose is to support external updates for the rtp streams
+// (e.g. receving rtp qos records/info without seeing the rtp packets).
+// It looks for the best matching entry, sets the statistics to the provideds
+//
+//	values and copies the matching callid (if  a match is found).
+//
+// It returns the match type (RTPNoMatch on failure),
+// the numbers of callid bytes copied and the original callid size.
+// It might return a match, but a 0-length original callid, if the call
+// state is in the process of being destroyed and no callid could be found
+// or if the provided destination call-id is nil (no interest in the call-id).
+// The caller should check if the callid did fit fully in the provided slice.
+func (h *RTPStreamHash) SetStats(dst, src NetInfo,
+	newStats PktStats, dstCallid []byte) (RTPMatchT, int, int) {
+	var match RTPMatchT
+	var copied, origSz int
+	var rtpEntry *RTPStreamEntry
+	var ce *CallEntry
+
+	hash := h.Hash(dst)
+	h.HTable[hash].Lock()
+	{
+		rtpEntry, match = h.HTable[hash].BestMatchUnsafe(dst, src)
+		if rtpEntry != nil {
+			rtpSess := rtpEntry.RTPSession()
+			if len(dstCallid) != 0 && rtpSess != nil {
+				/* if the stream is in the stream hash and the current
+				 * hash list is locked rs.ce cannot change under us
+				 * (is only set when creating a new rtp session, before
+				 *  adding any streams to the hash, or after removing
+				 * all the streams from the hash via RemoveAllStreams()
+				 */
+				ce = rtpSess.ce
+				if ce != nil {
+					ce.Ref()
+					// to avoid a possible deadlock don't copy
+					// the callid here, under rtpstream hash lock
+					// (since it would require locking ce)
+				}
+			}
+			rtpEntry.Stream.Stats = newStats
+			if newStats.RTPSampleRate == 0 {
+				// fix sample rate (depends on the negotiated
+				// codecs and clk rates)
+				payloadsNo := rtpEntry.Stream.PayloadsNo
+				rtpEntry.Stream.Stats.RTPSampleRate =
+					FindSampleRate(newStats.RTPPayloadType,
+						rtpEntry.Stream.Type,
+						rtpEntry.Stream.Payloads[:payloadsNo],
+						rtpEntry.Stream.ClkRates[:payloadsNo])
+			}
+		} // else rtpEntry == nil => no entry found for the packet
+	}
+	h.HTable[hash].Unlock()
+	if ce != nil {
+		if LockCallEntry(ce) {
+			cid := ce.Key.GetCallID()
+			copied = copy(dstCallid, cid)
+			origSz = len(cid)
+			UnlockCallEntry(ce)
+		} else {
+			WARN("failed to lock callentry %p" +
+				" (removed from hash?)\n")
+		}
+		ce.Unref()
+	}
+	// TODO: if not found (rtpEntry == nil) update some stats
+	return match, copied, origSz
+}
+
 /* PutStream will release references to a RTPStreamEntry
  * previously obtained via one of the Get*Stream() functions.
  * WARNING: do not use for the results of the Get*() functions that
