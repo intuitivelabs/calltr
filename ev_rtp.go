@@ -78,12 +78,10 @@ func (evr *EvRTPstreamDataT) String() string {
 
 func (evr *EvRTPstreamDataT) StreamString() string {
 	s := fmt.Sprintf("dst: %s:%d src: %s:%d pt: %d type: %s proto: %s"+
-		" ssrc: %9d jitter: %f loss: %f"+
-		"  rate: %f pkts/s %f B/s last s: %f b/s ",
+		" ssrc: %9d jitter: %f loss: %f ",
 		evr.Dst.String(), evr.DPort, evr.Src.String(), evr.SPort,
 		evr.Payload, evr.Type, evr.Proto, evr.SSRC,
 		evr.Jitter, evr.Loss,
-		evr.RateRTPpkts, evr.RateBytes, evr.RateBytesLastS,
 	)
 	return s
 }
