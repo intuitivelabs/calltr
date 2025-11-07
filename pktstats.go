@@ -72,8 +72,9 @@ func (s *PktStats) Update(from *PktStats) bool {
 	}
 	fromTn := timestamp.AtomicLoad(&from.RTPrcvdTSn)
 	tn := timestamp.AtomicLoad(&s.RTPrcvdTSn)
-	// new statistic block after
-	if fromT0.Equal(tn) || fromT0.After(tn) {
+	// new statistic block after (allow <1s overlap)
+	if fromT0.Equal(tn) || fromT0.After(tn) ||
+		(fromTn.After(tn) && tn.Sub(fromT0) < time.Second) {
 		timestamp.AtomicStore(&s.RTPrcvdTSn, fromTn)
 		// s.RTPrcvdT0 remains the same
 		// s.RTPpktTS0 remains the same
@@ -95,7 +96,8 @@ func (s *PktStats) Update(from *PktStats) bool {
 		return true
 	}
 	// new statistic block before current one
-	if fromTn.Before(t0) || fromTn.Equal(t0) {
+	if fromTn.Before(t0) || fromTn.Equal(t0) ||
+		(fromT0.Before(t0) && fromTn.Sub(t0) < time.Second) {
 		timestamp.AtomicStore(&s.RTPrcvdTS0, fromT0)
 		// s.RTPrcvdTn remains the same
 		// s.RTPpktTSn remains the same
