@@ -36,6 +36,8 @@ const (
 	EvNonSIPprobe // non sip probe
 
 	EvSDPupdate // sdp update
+	EvRTPstats1
+	EvRTPstats2
 	EvBad
 )
 
@@ -63,6 +65,8 @@ var evTypeName = [EvBad + 1]string{
 	EvParseErr:     "parse-error",
 	EvNonSIPprobe:  "msg-probe",
 	EvSDPupdate:    "sdp-update",
+	EvRTPstats1:    "rtp-stats1",
+	EvRTPstats2:    "rtp-stats2",
 	EvBad:          "invalid",
 }
 
@@ -102,6 +106,9 @@ const (
 	EvNonSIPprobeF  EventFlags = (EventFlags)(1) << EvNonSIPprobe
 	// SDP events
 	EvSDPupdateF EventFlags = (EventFlags)(1) << EvSDPupdate
+	// RTP events
+	EvRTPstats1F EventFlags = (EventFlags)(1) << EvRTPstats1
+	EvRTPstats2F EventFlags = (EventFlags)(1) << EvRTPstats2
 
 	EvRegMaskF EventFlags = EvRegNewF | EvRegDelF | EvRegExpiredF
 )
