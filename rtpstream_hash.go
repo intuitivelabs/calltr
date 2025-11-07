@@ -482,7 +482,7 @@ func (h *RTPStreamHash) ProcessPkt(dst, src NetInfo,
 // or if the provided destination call-id is nil (no interest in the call-id).
 // The caller should check if the callid did fit fully in the provided slice.
 func (h *RTPStreamHash) SetStatsAndRefCallEntry(dst, src NetInfo,
-	newStats PktStats,
+	newStats *PktStats,
 	dstCallid []byte, outCE **CallEntry) (RTPMatchT, int, int) {
 	var match RTPMatchT
 	var copied, origSz int
@@ -510,7 +510,7 @@ func (h *RTPStreamHash) SetStatsAndRefCallEntry(dst, src NetInfo,
 					// (since it would require locking ce)
 				}
 			}
-			rtpEntry.Stream.Stats = newStats
+			rtpEntry.Stream.Stats.Set(newStats)
 			if newStats.RTPSampleRate == 0 {
 				// fix sample rate (depends on the negotiated
 				// codecs and clk rates)

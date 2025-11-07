@@ -37,8 +37,31 @@ type PktStats struct {
 	RTPPayloadType RTPcodec
 }
 
+// Set copies the values from another PktStats.
+// (handling atomic values)
+func (s *PktStats) Set(from *PktStats) {
+	s.RTPSampleRate = from.RTPSampleRate
+	s.Rate = from.Rate
+	s.RTPdj = from.RTPdj
+	s.RTPssrc = from.RTPssrc
+	s.RTPPayloadType = from.RTPPayloadType
+
+	timestamp.AtomicStore(&s.RTPrcvdTS0, timestamp.AtomicLoad(&from.RTPrcvdTS0))
+	timestamp.AtomicStore(&s.RTPrcvdTSn, timestamp.AtomicLoad(&from.RTPrcvdTSn))
+	s.Pkts.Store(from.Pkts.Load())
+	s.Bytes.Store(from.Bytes.Load())
+	s.RTPpkts.Store(from.RTPpkts.Load())
+	s.RTPbytes.Store(from.RTPbytes.Load())
+	s.RTPexpected.Store(from.RTPexpected.Load())
+	s.RTPpktTS0.Store(from.RTPpktTS0.Load())
+	s.RTPpktTSn.Store(from.RTPpktTSn.Load())
+	s.RTPSeqNo.Store(from.RTPSeqNo.Load())
+	s.RTPSeqNo0.Store(from.RTPSeqNo0.Load())
+	s.RTPJitter16.Store(from.RTPJitter16.Load())
+}
+
 func (s *PktStats) Init() {
-	s.RTPrcvdTS0 = timestamp.Zero()
+	timestamp.AtomicStore(&s.RTPrcvdTS0, timestamp.Zero())
 	s.RTPpktTS0.Store(0)
 	s.RTPSeqNo0.Store(0)
 	s.RTPSampleRate = 0
@@ -73,12 +96,14 @@ func (s *PktStats) ComputeRateStart(crtT timestamp.TS) (float64, bool) {
 
 // compute RTP rate between first packet and last packet received times.
 func (s *PktStats) ComputeOverallRTPrate() (float64, bool) {
-	return computeRate(s.RTPrcvdTSn, s.RTPrcvdTS0, s.RTPpkts.Load())
+	return computeRate(timestamp.AtomicLoad(&s.RTPrcvdTSn),
+		timestamp.AtomicLoad(&s.RTPrcvdTS0), s.RTPpkts.Load())
 }
 
 // compute bytes rate between first packet and last packet received times.
 func (s *PktStats) ComputeOverallBytesRate() (float64, bool) {
-	return computeRate(s.RTPrcvdTSn, s.Rate.T0, s.Bytes.Load())
+	return computeRate(timestamp.AtomicLoad(&s.RTPrcvdTSn),
+		s.Rate.T0, s.Bytes.Load())
 }
 
 func (s *PktStats) AddPktSz(size uint32) {
