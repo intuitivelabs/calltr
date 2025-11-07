@@ -483,7 +483,8 @@ func (h *RTPStreamHash) ProcessPkt(dst, src NetInfo,
 // The caller should check if the callid did fit fully in the provided slice.
 func (h *RTPStreamHash) SetStatsAndRefCallEntry(dst, src NetInfo,
 	newStats *PktStats,
-	dstCallid []byte, outCE **CallEntry) (RTPMatchT, int, int) {
+	dstCallid []byte, ceSrc, ceDst *NetInfo,
+	outCE **CallEntry) (RTPMatchT, int, int) {
 	var match RTPMatchT
 	var copied, origSz int
 	var rtpEntry *RTPStreamEntry
@@ -495,7 +496,8 @@ func (h *RTPStreamHash) SetStatsAndRefCallEntry(dst, src NetInfo,
 		rtpEntry, match = h.HTable[hash].BestMatchUnsafe(dst, src)
 		if rtpEntry != nil {
 			rtpSess := rtpEntry.RTPSession()
-			if (len(dstCallid) != 0 || outCE != nil) && rtpSess != nil {
+			if (len(dstCallid) != 0 || outCE != nil || ceSrc != nil ||
+				ceDst != nil) && rtpSess != nil {
 				/* if the stream is in the stream hash and the current
 				 * hash list is locked rs.ce cannot change under us
 				 * (is only set when creating a new rtp session, before
@@ -525,11 +527,19 @@ func (h *RTPStreamHash) SetStatsAndRefCallEntry(dst, src NetInfo,
 	}
 	h.HTable[hash].Unlock()
 	if ce != nil {
-		if len(dstCallid) != 0 {
+		if len(dstCallid) != 0 || ceSrc != nil || ceDst != nil {
 			if LockCallEntry(ce) {
-				cid := ce.Key.GetCallID()
-				copied = copy(dstCallid, cid)
-				origSz = len(cid)
+				if len(dstCallid) != 0 {
+					cid := ce.Key.GetCallID()
+					copied = copy(dstCallid, cid)
+					origSz = len(cid)
+				}
+				if ceSrc != nil {
+					*ceSrc = ce.EndPoint[0]
+				}
+				if ceDst != nil {
+					*ceDst = ce.EndPoint[1]
+				}
 				UnlockCallEntry(ce)
 			} else {
 				WARN("failed to lock callentry %p" +
