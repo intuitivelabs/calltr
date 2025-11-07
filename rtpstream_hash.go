@@ -468,8 +468,8 @@ func (h *RTPStreamHash) ProcessPkt(dst, src NetInfo,
 // (e.g. receving rtp qos records/info without seeing the rtp packets).
 // It looks for the best matching entry, sets the statistics to the provided
 // values, copies the matching callid (if a match is found and dstCallid
-// is not nil), and returns a referenced CallEntry (if a match is found
-// and outCE is not nil).
+// is not nil), the source and destination addresses and returns a
+// referenced CallEntry (if a match is found and outCE is not nil).
 //
 // WARNING: if outCE is not nil, the caller of this function gets
 // ownership of a CallEntry reference and it is its responsibility
@@ -485,8 +485,77 @@ func (h *RTPStreamHash) SetStatsAndRefCallEntry(dst, src NetInfo,
 	newStats *PktStats,
 	dstCallid []byte, ceSrc, ceDst *NetInfo,
 	outCE **CallEntry) (RTPMatchT, int, int) {
+	m, n, sz, _ :=
+		h.updateStatsAndRefCallEntry(dst, src, newStats, true,
+			dstCallid, ceSrc, ceDst, outCE)
+	return m, n, sz
+}
+
+// UpdateStatsAndRefCallEntry updates the statistics for the
+// matching rtp stream and allows retrieving the matching referenced
+// CallEntry.
+// It's purpose is to support external updates for the rtp streams
+// (e.g. receving rtp qos records/info without seeing the rtp packets).
+// It looks for the best matching entry, updates the statistics to the
+// provided values, copies the matching callid (if a match is found
+// and dstCallid is not nil), the source and destination addresses
+// and returns a referenced CallEntry (if a match is found and outCE
+// is not nil).
+//
+// WARNING: if outCE is not nil, the caller of this function gets
+// ownership of a CallEntry reference and it is its responsibility
+// to call Unref() on it when no longer needed (or cause a memory leak)
+//
+// It returns the match type (RTPNoMatch on failure),
+// the numbers of callid bytes copied, the original callid size.and
+// if the update operation succeeded or failed (overlapping time).
+//
+// It might return a match, but a 0-length original callid, if the call
+// state is in the process of being destroyed and no callid could be found
+// or if the provided destination call-id is nil (no interest in the call-id).
+// The caller should check if the callid did fit fully in the provided slice.
+func (h *RTPStreamHash) UpdateStatsAndRefCallEntry(dst, src NetInfo,
+	newStats *PktStats, dstCallid []byte, ceSrc, ceDst *NetInfo,
+	outCE **CallEntry) (RTPMatchT, int, int, bool) {
+	return h.updateStatsAndRefCallEntry(dst, src, newStats, false,
+		dstCallid, ceSrc, ceDst, outCE)
+}
+
+// updateStatsAndRefCallEntry sets or updates the statistics for the
+//
+//	matching rtp stream and allows retrieving the matching referenced
+//
+// CallEntry.
+// It is an internal function used by SetStatsAndRefCallEntry and
+// UpdateStatsAndRefCallEntry.
+// It's purpose is to support external updates for the rtp streams
+// (e.g. receving rtp qos records/info without seeing the rtp packets).
+// It looks for the best matching entry, sets the statistics to the provided
+// values, copies the matching callid (if a match is found and dstCallid
+// is not nil), and returns a referenced CallEntry (if a match is found
+// and outCE is not nil).
+// If "set" is true it will set the statistics and if false it will update
+// them if the time intervals are not overlaping.
+//
+// WARNING: if outCE is not nil, the caller of this function gets
+// ownership of a CallEntry reference and it is its responsibility
+// to call Unref() on it when no longer needed (or cause a memory leak)
+//
+// It returns the match type (RTPNoMatch on failure),
+// the numbers of callid bytes copied, the original callid size.and
+// if the update operation succeeded or failed (overlapping time).
+//
+// It might return a match, but a 0-length original callid, if the call
+// state is in the process of being destroyed and no callid could be found
+// or if the provided destination call-id is nil (no interest in the call-id).
+// The caller should check if the callid did fit fully in the provided slice.
+func (h *RTPStreamHash) updateStatsAndRefCallEntry(dst, src NetInfo,
+	newStats *PktStats, set bool,
+	dstCallid []byte, ceSrc, ceDst *NetInfo,
+	outCE **CallEntry) (RTPMatchT, int, int, bool) {
 	var match RTPMatchT
 	var copied, origSz int
+	var ret bool
 	var rtpEntry *RTPStreamEntry
 	var ce *CallEntry
 
@@ -512,7 +581,12 @@ func (h *RTPStreamHash) SetStatsAndRefCallEntry(dst, src NetInfo,
 					// (since it would require locking ce)
 				}
 			}
-			rtpEntry.Stream.Stats.Set(newStats)
+			if set {
+				rtpEntry.Stream.Stats.Set(newStats)
+				ret = true
+			} else {
+				ret = rtpEntry.Stream.Stats.Update(newStats)
+			}
 			if newStats.RTPSampleRate == 0 {
 				// fix sample rate (depends on the negotiated
 				// codecs and clk rates)
@@ -553,7 +627,7 @@ func (h *RTPStreamHash) SetStatsAndRefCallEntry(dst, src NetInfo,
 		}
 	}
 	// TODO: if not found (rtpEntry == nil) update some stats
-	return match, copied, origSz
+	return match, copied, origSz, ret
 }
 
 /* PutStream will release references to a RTPStreamEntry

@@ -60,6 +60,67 @@ func (s *PktStats) Set(from *PktStats) {
 	s.RTPJitter16.Store(from.RTPJitter16.Load())
 }
 
+// Update uses the values from another PktStats to update the
+// current statistics, if the time intervals do not overlap
+func (s *PktStats) Update(from *PktStats) bool {
+	fromT0 := timestamp.AtomicLoad(&from.RTPrcvdTS0)
+	t0 := timestamp.AtomicLoad(&s.RTPrcvdTS0)
+	if timestamp.AtomicCompareAndSwap(&s.RTPrcvdTS0, timestamp.Zero(), fromT0) {
+		// old value was zero => init using "from"
+		s.Set(from)
+		return true
+	}
+	fromTn := timestamp.AtomicLoad(&from.RTPrcvdTSn)
+	tn := timestamp.AtomicLoad(&s.RTPrcvdTSn)
+	// new statistic block after
+	if fromT0.Equal(tn) || fromT0.After(tn) {
+		timestamp.AtomicStore(&s.RTPrcvdTSn, fromTn)
+		// s.RTPrcvdT0 remains the same
+		// s.RTPpktTS0 remains the same
+		s.RTPpktTSn.Store(from.RTPpktTSn.Load())
+		s.RTPSampleRate = from.RTPSampleRate
+		s.Rate = from.Rate
+		// s.RTPdj = from.RTPdj -- not possible to update
+		s.RTPssrc = from.RTPssrc // maybe newer
+		s.RTPPayloadType = from.RTPPayloadType
+
+		s.Pkts.Add(from.Pkts.Load())
+		s.Bytes.Add(from.Bytes.Load())
+		s.RTPpkts.Add(from.RTPpkts.Load())
+		s.RTPbytes.Add(from.RTPbytes.Load())
+		s.RTPexpected.Add(from.RTPexpected.Load())
+		s.RTPSeqNo.Store(from.RTPSeqNo.Load())
+		// s.RTPSeqNo0 remains the same
+		s.RTPJitter16.Store(from.RTPJitter16.Load())
+		return true
+	}
+	// new statistic block before current one
+	if fromTn.Before(t0) || fromTn.Equal(t0) {
+		timestamp.AtomicStore(&s.RTPrcvdTS0, fromT0)
+		// s.RTPrcvdTn remains the same
+		// s.RTPpktTSn remains the same
+		s.RTPpktTS0.Store(from.RTPpktTS0.Load())
+		// s.RTPSampleRate = from.RTPSampleRate
+		// s.Rate = from.Rate
+		// s.RTPdj = from.RTPdj -- not possible to update
+		// s.RTPssrc = from.RTPssrc
+		// s.RTPPayloadType = from.RTPPayloadType
+
+		s.Pkts.Add(from.Pkts.Load()) // add missing packets
+		s.Bytes.Add(from.Bytes.Load())
+		s.RTPpkts.Add(from.RTPpkts.Load())
+		s.RTPbytes.Add(from.RTPbytes.Load())
+		s.RTPexpected.Add(from.RTPexpected.Load())
+		s.RTPSeqNo0.Store(from.RTPSeqNo0.Load())
+		// s.RTPSeqNo remains the same
+		// old: s.RTPJitter16.Store(from.RTPJitter16.Load())
+		return true
+	}
+	// new statistics overlaps somehow the current times
+	// interval => ignore
+	return false
+}
+
 func (s *PktStats) Init() {
 	timestamp.AtomicStore(&s.RTPrcvdTS0, timestamp.Zero())
 	s.RTPpktTS0.Store(0)
