@@ -1,9 +1,14 @@
 # vi swaps
 .*.swp
+.*.swo
+.*.swn
 # Emacs backup files
 *~
 # Emacs file loc
 .#*
+# various backup files
+*.bak
+*.bak[0-9]
 # tags
 tags
 TAGS
