@@ -462,12 +462,18 @@ func (h *RTPStreamHash) ProcessPkt(dst, src NetInfo,
 	return match, copied, origSz
 }
 
-// SetStats sets the statistics for the matching rtp stream.
+// SetStatsAndRefCallEntry sets the statistics for the matching rtp stream
+// and allows retrieving the matching referenced CallEntry.
 // It's purpose is to support external updates for the rtp streams
 // (e.g. receving rtp qos records/info without seeing the rtp packets).
-// It looks for the best matching entry, sets the statistics to the provideds
+// It looks for the best matching entry, sets the statistics to the provided
+// values, copies the matching callid (if a match is found and dstCallid
+// is not nil), and returns a referenced CallEntry (if a match is found
+// and outCE is not nil).
 //
-//	values and copies the matching callid (if  a match is found).
+// WARNING: if outCE is not nil, the caller of this function gets
+// ownership of a CallEntry reference and it is its responsibility
+// to call Unref() on it when no longer needed (or cause a memory leak)
 //
 // It returns the match type (RTPNoMatch on failure),
 // the numbers of callid bytes copied and the original callid size.
@@ -475,8 +481,9 @@ func (h *RTPStreamHash) ProcessPkt(dst, src NetInfo,
 // state is in the process of being destroyed and no callid could be found
 // or if the provided destination call-id is nil (no interest in the call-id).
 // The caller should check if the callid did fit fully in the provided slice.
-func (h *RTPStreamHash) SetStats(dst, src NetInfo,
-	newStats PktStats, dstCallid []byte) (RTPMatchT, int, int) {
+func (h *RTPStreamHash) SetStatsAndRefCallEntry(dst, src NetInfo,
+	newStats PktStats,
+	dstCallid []byte, outCE **CallEntry) (RTPMatchT, int, int) {
 	var match RTPMatchT
 	var copied, origSz int
 	var rtpEntry *RTPStreamEntry
@@ -488,7 +495,7 @@ func (h *RTPStreamHash) SetStats(dst, src NetInfo,
 		rtpEntry, match = h.HTable[hash].BestMatchUnsafe(dst, src)
 		if rtpEntry != nil {
 			rtpSess := rtpEntry.RTPSession()
-			if len(dstCallid) != 0 && rtpSess != nil {
+			if (len(dstCallid) != 0 || outCE != nil) && rtpSess != nil {
 				/* if the stream is in the stream hash and the current
 				 * hash list is locked rs.ce cannot change under us
 				 * (is only set when creating a new rtp session, before
@@ -518,16 +525,22 @@ func (h *RTPStreamHash) SetStats(dst, src NetInfo,
 	}
 	h.HTable[hash].Unlock()
 	if ce != nil {
-		if LockCallEntry(ce) {
-			cid := ce.Key.GetCallID()
-			copied = copy(dstCallid, cid)
-			origSz = len(cid)
-			UnlockCallEntry(ce)
-		} else {
-			WARN("failed to lock callentry %p" +
-				" (removed from hash?)\n")
+		if len(dstCallid) != 0 {
+			if LockCallEntry(ce) {
+				cid := ce.Key.GetCallID()
+				copied = copy(dstCallid, cid)
+				origSz = len(cid)
+				UnlockCallEntry(ce)
+			} else {
+				WARN("failed to lock callentry %p" +
+					" (removed from hash?)\n")
+			}
 		}
-		ce.Unref()
+		if outCE != nil {
+			*outCE = ce
+		} else {
+			ce.Unref()
+		}
 	}
 	// TODO: if not found (rtpEntry == nil) update some stats
 	return match, copied, origSz
