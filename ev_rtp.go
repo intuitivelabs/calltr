@@ -27,6 +27,7 @@ type EvRTPstreamDataT struct {
 
 	ClkRate uint32
 	SSRC    uint32
+	SSRCupd uint32 // SSRC changes/updates
 
 	LastSeqNo uint16
 
@@ -55,10 +56,11 @@ func (evr *EvRTPstreamDataT) fillUnsafe(rs *RTPStreamData) bool {
 	evr.RTPbytes = uint32(rs.Stats.RTPbytes.Load())
 	evr.RTPpkts = uint32(rs.Stats.RTPpkts.Load())
 	evr.Expected = rs.Stats.Expected()
-	evr.DjStats = rs.Stats.RTPdj.stats
+	evr.DjStats = rs.Stats.RTPdj.Stats
 
 	evr.ClkRate = rs.Stats.RTPSampleRate
-	evr.SSRC = rs.Stats.RTPssrc
+	evr.SSRC = rs.Stats.RTPssrc.Load()
+	evr.SSRCupd = rs.Stats.RTPssrcChanges.Load()
 	evr.LastSeqNo = uint16(rs.Stats.RTPSeqNo.Load())
 
 	evr.Payload = uint8(rs.Stats.RTPPayloadType)
@@ -78,9 +80,9 @@ func (evr *EvRTPstreamDataT) String() string {
 
 func (evr *EvRTPstreamDataT) StreamString() string {
 	s := fmt.Sprintf("dst: %s:%d src: %s:%d pt: %d type: %s proto: %s"+
-		" ssrc: %9d jitter: %f loss: %f ",
+		" ssrc: %9d (upd: %d) jitter: %f loss: %f ",
 		evr.Dst.String(), evr.DPort, evr.Src.String(), evr.SPort,
-		evr.Payload, evr.Type, evr.Proto, evr.SSRC,
+		evr.Payload, evr.Type, evr.Proto, evr.SSRC, evr.SSRCupd,
 		evr.Jitter, evr.Loss,
 	)
 	return s

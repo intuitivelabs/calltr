@@ -19,7 +19,7 @@ type RTPdjStats struct {
 // djBuf emulates a de-jitter buffer, keeping only
 // the information needed for statistics
 type djBuf struct {
-	stats RTPdjStats
+	Stats RTPdjStats
 
 	headIdx djBufIdx // first packet index
 	pktNo   djBufIdx // number of packets in the buffer
@@ -37,7 +37,7 @@ func (b *djBuf) idx(i uint) djBufIdx {
 }
 
 func (b *djBuf) Add(seqNo RTPseq, ts RTPts) bool {
-	if b.stats.TotalQueued == 0 {
+	if b.Stats.TotalQueued == 0 {
 		// 1st packet seen => init
 		b.headSeq = seqNo
 		b.headIdx = 0
@@ -45,7 +45,7 @@ func (b *djBuf) Add(seqNo RTPseq, ts RTPts) bool {
 	}
 	rpos := seqNo - b.headSeq // relative position to head
 	if rpos.Sign() {          // diff >= 32768 => too old
-		b.stats.DropOld++
+		b.Stats.DropOld++
 		return false
 	}
 
@@ -72,12 +72,12 @@ func (b *djBuf) Add(seqNo RTPseq, ts RTPts) bool {
 		}
 	} else { // rpos < pktNo -> added somewhere in the middle
 		if !b.buf[b.idx(wpos)].used {
-			b.stats.OutOfOrder++
+			b.Stats.OutOfOrder++
 		}
 	}
 	if b.buf[b.idx(wpos)].used {
 		if b.buf[b.idx(wpos)].seq == seqNo {
-			b.stats.Dups++
+			b.Stats.Dups++
 		} else {
 			BUG("overwrite of non empty entry in djBuf: "+
 				"seq. no %d, ts %d, idx %d old seq no %d, "+
@@ -88,7 +88,7 @@ func (b *djBuf) Add(seqNo RTPseq, ts RTPts) bool {
 			return false
 		}
 	} else {
-		b.stats.TotalQueued++
+		b.Stats.TotalQueued++
 	}
 	b.buf[b.idx(wpos)].seq = seqNo
 	b.buf[b.idx(wpos)].used = true

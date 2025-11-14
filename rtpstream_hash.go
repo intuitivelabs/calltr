@@ -582,7 +582,7 @@ func (h *RTPStreamHash) updateStatsAndRefCallEntry(dst, src NetInfo,
 				}
 			}
 			if set {
-				rtpEntry.Stream.Stats.Set(newStats)
+				rtpEntry.Stream.Stats.Set(newStats, false)
 				ret = true
 			} else {
 				ret = rtpEntry.Stream.Stats.Update(newStats)
@@ -701,9 +701,11 @@ func (h *RTPStreamHash) PrintFilter(w io.Writer,
 					e.Stream.Stats.Rate.T0.Truncate(time.Second),
 					now.Sub(e.Stream.Stats.Rate.T0).Truncate(time.Second),
 				)
-				fmt.Fprintf(w, "rtp    payload: %d  clk rate: %6d\n",
+				fmt.Fprintf(w, "rtp    payload: %d  clk rate: %6d"+
+					"  ssrc: %6d (changes: %d)\n",
 					e.Stream.Stats.RTPPayloadType,
-					e.Stream.Stats.RTPSampleRate)
+					e.Stream.Stats.RTPSampleRate,
+					e.Stream.Stats.RTPssrc.Load(), e.Stream.Stats.RTPssrcChanges.Load())
 				fmt.Fprintf(w, "rtp    pkts: %5d  bytes: %9d Kb\n",
 					e.Stream.Stats.RTPpkts.Load(),
 					e.Stream.Stats.RTPbytes.Load()/1024,
