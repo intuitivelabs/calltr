@@ -287,6 +287,27 @@ func (s CallState) TimeoutS() uint {
 	return uint(GetCfg().stateTimeoutS[s])
 }
 
+// ActiveInvite returns true if the callstate corresponds to an active
+// INVITE initiated call
+func (s CallState) ActiveInvite() bool {
+	switch s {
+	case CallStFInv, CallStEarlyDlg, CallStEstablished:
+		return true
+	}
+	return false
+}
+
+// Invite returns true if the call state is related to an INVITE initiated
+// call
+func (s CallState) Invite() bool {
+	switch s {
+	case CallStFInv, CallStEarlyDlg, CallStEstablished,
+		CallStCanceled, CallStBye, CallStByeReplied, CallStNegReply:
+		return true
+	}
+	return false
+}
+
 // StateTimeoutRange returns the valid timeout range (in seconds)
 // for the corresponding call state s.
 func StateTimeoutRange(s CallState) (uint, uint) {
