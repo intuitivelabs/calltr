@@ -753,6 +753,12 @@ func (ed *EventData) String() string {
 // returns ev or EvNone (if event was a retr)
 // unsafe, MUST be called w/ _e_ lock held or if no parallel access is possible
 func updateEvent(ev EventType, e *CallEntry) EventType {
+	// special case: statistics -> allow multiple same type events
+	if ev == EvRTPstats1 || ev == EvRTPstats2 {
+		e.EvFlags.Set(ev)
+		// do not set e.crtEv or e.lastEv for stats
+		return ev
+	}
 	// new event only if entry was not already canceled and event not
 	// already generated
 	if ev != EvNone && (e.Flags&CFCanceled == 0) && !e.EvFlags.Set(ev) {

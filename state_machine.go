@@ -694,12 +694,35 @@ retr: // retransmission, ignore
 }
 
 // unsafe, MUST be called w/ lock held or if no parallel access is possible
-// It returns 2 event, one sip call related and one sdp event.
-func updateState(e *CallEntry, m *sipsp.PSIPMsg, dir int) (CallState, TimeoutS, TimerUpdateF, EventType, EventType) {
+// It returns the entry expire timeout, the next statistics interval,
+// the timer flags and 2 events, one sip call related and one sdp/rtp event.
+func updateState(e *CallEntry, m *sipsp.PSIPMsg, dir int) (CallState, TimeoutS, TimeoutS, TimerUpdateF, EventType, EventType) {
+	var newState CallState
+	var expireTo, statsInt TimeoutS
+	var timerFlgs TimerUpdateF
+	var ev, sdpEv EventType
+	prevState := e.State
+
 	if m.FL.Request() {
-		return updateStateReq(e, m, dir)
+		newState, expireTo, timerFlgs, ev, sdpEv = updateStateReq(e, m, dir)
+	} else {
+		newState, expireTo, timerFlgs, ev, sdpEv = updateStateRepl(e, m, dir)
 	}
-	return updateStateRepl(e, m, dir)
+	// set the statistics interval
+	cfgStatsInt := TimeoutS(GetCfg().StatsInterval)
+	if cfgStatsInt > 0 && newState != prevState {
+		switch newState {
+		case CallStEstablished:
+			// enable periodic statistics only the moment a call transitions
+			// to established
+			statsInt = cfgStatsInt
+		case CallStByeReplied, CallStBye:
+			// stop statistics if we see a BYE
+			timerFlgs |= FTimerStatsStopT
+			statsInt = 0
+		}
+	}
+	return newState, expireTo, statsInt, timerFlgs, ev, sdpEv
 }
 
 // reported reason for internal timeouts
