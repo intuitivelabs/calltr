@@ -319,9 +319,10 @@ func csTimerTryRestartUnsafe(cs *CallEntry, after time.Duration) (bool,
 				n := runtime.Stack(buf[:], false)
 				WARN("csTimerTryRestartUnsafe: timers.Add failed backtrace:\n"+
 					"%s\n", buf[:n])
-				WARN("csTimerTryRestartUnsafe: timers.Add failed "+
-					" for call entry %p with %s after\n",
-					cs, after)
+				WARN("csTimerTryRestartUnsafe: timers.Add failed"+
+					" for call entry %p with %s after, msg trace: %s states: %s"+"%s callid: %q fromtag: %q\n",
+					cs, after, cs.lastMsgs.String(), cs.State, cs.prevState.String(),
+					cs.Key.GetCallID(), cs.Key.GetFromTag())
 			}
 
 			return false, err
@@ -339,8 +340,9 @@ func csTimerTryRestartUnsafe(cs *CallEntry, after time.Duration) (bool,
 		WARN("csTimerTryRestartUnsafe: update timer  failed (race?): backtrace:\n"+
 			"%s\n", buf[:n])
 		WARN("csTimerTryRestartUnsafe: update timer  failed (race?)"+
-			" for call entry %p with %s after\n",
-			cs, after)
+			" for call entry %p with %s after, msg trace: %s states: %s"+"%s callid: %q fromtag: %q\n",
+			cs, after, cs.lastMsgs.String(), cs.State, cs.prevState.String(),
+			cs.Key.GetCallID(), cs.Key.GetFromTag())
 	}
 
 	return false, nil
@@ -426,9 +428,10 @@ func csTimerUpdateExpireUnsafe(cs *CallEntry, after time.Duration,
 			n := runtime.Stack(buf[:], false)
 			WARN("csTimerUpdateExpireUnsafe: update timer  failed: backtrace:\n"+
 				"%s\n", buf[:n])
-			WARN("csTimerUpdateTimeoutUnsafe: update timer  failed"+
-				" for call entry %p with %s after\n",
-				cs, after)
+			WARN("csTimerUpdateExpireUnsafe: update timer  failed"+
+				" for call entry %p with %s after, msg trace: %s states: %s"+"%s callid: %q fromtag: %q\n",
+				cs, after, cs.lastMsgs.String(), cs.State, cs.prevState.String(),
+				cs.Key.GetCallID(), cs.Key.GetFromTag())
 		}
 		return false
 	}
