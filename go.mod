@@ -12,5 +12,5 @@ require (
 	github.com/intuitivelabs/slog v0.0.3
 	github.com/intuitivelabs/timestamp v0.0.4
 	github.com/intuitivelabs/unsafeconv v0.0.3
-	github.com/intuitivelabs/wtimer v0.0.3
+	github.com/intuitivelabs/wtimer v0.0.4-0.20260202095537-12b2c542343a
 )

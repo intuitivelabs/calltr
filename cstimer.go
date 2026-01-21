@@ -55,12 +55,23 @@ type TimerInfo struct {
 	done int32 // terminated timers set this to 1
 }
 
-func (ti *TimerInfo) NextTimeout() timestamp.TS {
+// NextRun returns the timestamp when the timer handle will be run.
+func (ti *TimerInfo) NextRun() timestamp.TS {
+	return timers.Expire(&ti.timerH)
+}
+
+// NextSetTimeout returns the computed timestamp for the next run.
+// This might be different from the actual time the timer handle is
+// first called (the timer handler might expire sooner and be extended
+// inside the handler to NextSetTimeout, e.g. when the timer expire or
+// statistics interval are changed to longer values on a running timer).
+func (ti *TimerInfo) NextSetTimeout() timestamp.TS {
 	statsT := timestamp.AtomicLoad(&ti.StatsT)
 	expire := timestamp.AtomicLoad(&ti.Expire)
 	return timeoutNext(expire, statsT)
 }
 
+// timeoutNext compares 2 timestamp and returns the smaller non-zero one.
 func timeoutNext(expire, nextStatsT timestamp.TS) timestamp.TS {
 	if (!nextStatsT.IsZero() && nextStatsT.Before(expire)) ||
 		expire.IsZero() {
@@ -72,13 +83,13 @@ func timeoutNext(expire, nextStatsT timestamp.TS) timestamp.TS {
 // csTimerInitUnsafe initialises the CallEntry Timer structure.
 func csTimerInitUnsafe(cs *CallEntry, after, statsInt time.Duration) {
 	now := timestamp.Now()
-	cs.Timer.Expire = now.Add(after)
-	cs.Timer.done = 0
+	timestamp.AtomicStore(&cs.Timer.Expire, now.Add(after))
+	atomic.StoreInt32(&cs.Timer.done, 0)
 	if statsInt != 0 {
 		// enable periodic stats
-		cs.Timer.StatsT = now.Add(statsInt)
+		timestamp.AtomicStore(&cs.Timer.StatsT, now.Add(statsInt))
 	} else {
-		cs.Timer.StatsT = timestamp.Zero()
+		timestamp.AtomicStore(&cs.Timer.StatsT, timestamp.Zero())
 	}
 	if err := timers.InitTimer(&cs.Timer.timerH, timersFlags); err != nil {
 		Log.PANIC("failed timer init for call entry %p timeout %s : %s\n",
@@ -215,7 +226,7 @@ func csTimerStartUnsafe(cs *CallEntry) bool {
 			cs, cs.Timer.timerH)
 		return false
 	}
-	next := cs.Timer.NextTimeout()
+	next := cs.Timer.NextSetTimeout()
 	now := timestamp.Now()
 	delta := next.Sub(now)
 	if next.Before(now) || next.IsZero() {
@@ -301,7 +312,7 @@ func csTimerTryRestartUnsafe(cs *CallEntry, after time.Duration) (bool,
 	if csTimerTryStopUnsafe(cs) {
 		// stopping the timer succeeded =>
 		// re-init timer preserving the handle
-		cs.Timer.done = 0
+		atomic.StoreInt32(&cs.Timer.done, 0)
 		if err := timers.Reset(&cs.Timer.timerH, timersFlags); err != nil {
 			BUG("csTimerTryRestartUnsafe: reset active timer after"+
 				" stop failed for call entry %p: delta: %s: %s\n",
@@ -340,9 +351,12 @@ func csTimerTryRestartUnsafe(cs *CallEntry, after time.Duration) (bool,
 		WARN("csTimerTryRestartUnsafe: update timer  failed (race?): backtrace:\n"+
 			"%s\n", buf[:n])
 		WARN("csTimerTryRestartUnsafe: update timer  failed (race?)"+
-			" for call entry %p with %s after, msg trace: %s states: %s"+"%s callid: %q fromtag: %q\n",
+			" for call entry %p with %s after, msg trace: %s states: %s"+"%s callid: %q fromtag: %q"+
+			" expire ticks: %d ticks now %d intvl %s expire time %s now %s\n",
 			cs, after, cs.lastMsgs.String(), cs.State, cs.prevState.String(),
-			cs.Key.GetCallID(), cs.Key.GetFromTag())
+			cs.Key.GetCallID(), cs.Key.GetFromTag(),
+			cs.Timer.timerH.Exp(), timers.Now(), cs.Timer.timerH.Intvl(),
+			timers.Timestamp(cs.Timer.timerH.Exp()), timestamp.Now())
 	}
 
 	return false, nil
@@ -374,10 +388,9 @@ func csTimerUpdateExpireUnsafe(cs *CallEntry, after time.Duration,
 	// needed anymore (since using wtimer). It doesn't seem to
 	// bring any performance advantage.
 
-	statsT := timestamp.AtomicLoad(&cs.Timer.StatsT)
 	// DBG start timer force del always start
 	//if true {
-	if timeoutNext(expire, statsT).After(newExpire) {
+	if cs.Timer.NextRun().After(newExpire) {
 		// DBG stop
 
 		// timeout reduced => have to stop & re-add
@@ -400,8 +413,8 @@ func csTimerUpdateExpireUnsafe(cs *CallEntry, after time.Duration,
 		if csTimerTryStopUnsafe(cs) {
 			// stopping the timer succeeded =>
 			// re-init timer preserving the handle
-			cs.Timer.done = 0
-			cs.Timer.Expire = newExpire
+			atomic.StoreInt32(&cs.Timer.done, 0)
+			timestamp.AtomicStore(&cs.Timer.Expire, newExpire)
 			if err := timers.Reset(&cs.Timer.timerH, timersFlags); err != nil {
 				BUG("csTimerUpdateExpireUnsafe: reset active timer after"+
 					" stop failed for call entry %p: delta: %s: %s\n",
@@ -426,12 +439,18 @@ func csTimerUpdateExpireUnsafe(cs *CallEntry, after time.Duration,
 		if WARNon() {
 			var buf [1024]byte
 			n := runtime.Stack(buf[:], false)
+			statsT := timestamp.AtomicLoad(&cs.Timer.StatsT)
 			WARN("csTimerUpdateExpireUnsafe: update timer  failed: backtrace:\n"+
 				"%s\n", buf[:n])
 			WARN("csTimerUpdateExpireUnsafe: update timer  failed"+
-				" for call entry %p with %s after, msg trace: %s states: %s"+"%s callid: %q fromtag: %q\n",
-				cs, after, cs.lastMsgs.String(), cs.State, cs.prevState.String(),
-				cs.Key.GetCallID(), cs.Key.GetFromTag())
+				" for call entry %p @ %s + %s after, new expire %s, prev expire %s,"+
+				" stats next %s,  msg trace: %s states: %s"+"%s callid: %q fromtag: %q"+
+				" expire ticks: %d ticks now %d intvl %s expire time %s now %s\n",
+				cs, timestamp.Now(), after, newExpire, expire, statsT,
+				cs.lastMsgs.String(), cs.State, cs.prevState.String(),
+				cs.Key.GetCallID(), cs.Key.GetFromTag(),
+				cs.Timer.timerH.Exp(), timers.Now(), cs.Timer.timerH.Intvl(),
+				timers.Timestamp(cs.Timer.timerH.Exp()), timestamp.Now())
 		}
 		return false
 	}
@@ -453,7 +472,7 @@ func csTimerSetStatsTimeoutUnsafe(cs *CallEntry, after time.Duration,
 	// NOTE: the remove/update timer only if expire increased is not
 	// needed anymore (since using wtimer). It doesn't seem to
 	// bring any performance advantage.
-	if cs.Timer.NextTimeout().After(newStatsT) {
+	if cs.Timer.NextRun().After(newStatsT) {
 		// new stats timeout sooner => have to stop & re-add
 		timestamp.AtomicStore(&cs.Timer.StatsT, newStatsT)
 		if ok, err := csTimerTryRestartUnsafe(cs, after); ok {
@@ -514,8 +533,8 @@ func csTimerUpdateTimeoutsUnsafe(cs *CallEntry, after, statsInt time.Duration,
 	newT := timeoutNext(newExpire, newStatsT)
 
 	timestamp.AtomicStore(&cs.Timer.Expire, newExpire)
-	crtStatsT := timestamp.AtomicSwap(&cs.Timer.StatsT, newStatsT)
-	crtT := timeoutNext(crtExpire, crtStatsT)
+	timestamp.AtomicStore(&cs.Timer.StatsT, newStatsT)
+	crtT := cs.Timer.NextRun()
 	if newT.Before(crtT) {
 		// we have to change the timer (it needs to expire sooner)
 		if ok, err := csTimerTryRestartUnsafe(cs, newT.Sub(now)); ok {

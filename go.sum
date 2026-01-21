@@ -32,8 +32,8 @@ github.com/intuitivelabs/timestamp v0.0.4 h1:R8a9g6W9anHu8uX/FE+Xd2/2pQYtiVJgFUr
 github.com/intuitivelabs/timestamp v0.0.4/go.mod h1:g6iXgcaQTyNvYhRewLj5li0dhUBrlm0ibApJTklqoXU=
 github.com/intuitivelabs/unsafeconv v0.0.3 h1:SF8sbwkSHsWqc2RpQWCk5zZt/0EabS4PeKDiSan3dfQ=
 github.com/intuitivelabs/unsafeconv v0.0.3/go.mod h1:QK7AOVbwVRbhdxEwAT8BsUvLqliEHETqqF9r74ICb8g=
-github.com/intuitivelabs/wtimer v0.0.3 h1:1ziVNpwuWNaD6tXw74LA9VAvrCpTlMd84FGsw9E/x/A=
-github.com/intuitivelabs/wtimer v0.0.3/go.mod h1:WrrvfXJ1yBcbsxvfwmRGBS1uzuUV5EDATUh619lEaMI=
+github.com/intuitivelabs/wtimer v0.0.4-0.20260202095537-12b2c542343a h1:6rOIv3HusIVV4/Y3TnWfsgEqqA7YNAKqQTgNtYg2EXI=
+github.com/intuitivelabs/wtimer v0.0.4-0.20260202095537-12b2c542343a/go.mod h1:WrrvfXJ1yBcbsxvfwmRGBS1uzuUV5EDATUh619lEaMI=
 gopkg.in/check.v1 v0.0.0-20161208181325-20d25e280405 h1:yhCVgyC4o1eVCa2tZl7eS0r+SDo693bJlVdllGtEeKM=
 gopkg.in/check.v1 v0.0.0-20161208181325-20d25e280405/go.mod h1:Co6ibVJAznAaIkqp8huTwlJQCZ016jof/cbN4VW5Yz0=
 gopkg.in/yaml.v3 v3.0.0-20200313102051-9f266ea9e77c/go.mod h1:K4uyk7z7BCEPqu6E+C64Yfv1cQ7kz7rIZviUmN+EgEM=
