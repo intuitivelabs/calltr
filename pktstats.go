@@ -31,7 +31,7 @@ type PktStats struct {
 
 		Bytes PktRate
 	}
-	RTPdj          djBuf
+	DjStats        RTPdjStats
 	RTPssrc        uint32
 	RTPssrcChanges uint32 // how many times did the SSRC change
 	RTPPayloadType RTPcodec
@@ -43,7 +43,7 @@ type PktStats struct {
 func (s *PktStats) Set(from *PktStats, partialSet bool) {
 	s.RTPSampleRate = from.RTPSampleRate
 	s.Rate = from.Rate
-	s.RTPdj = from.RTPdj
+	s.DjStats = from.DjStats
 	s.RTPPayloadType = from.RTPPayloadType
 
 	if !partialSet {
@@ -96,10 +96,10 @@ func (s *PktStats) Update(from *PktStats) bool {
 			return true
 		}
 
-		s.RTPdj.Stats.TotalQueued += from.RTPdj.Stats.TotalQueued
-		s.RTPdj.Stats.Dups += from.RTPdj.Stats.Dups
-		s.RTPdj.Stats.DropOld += from.RTPdj.Stats.DropOld
-		s.RTPdj.Stats.OutOfOrder += from.RTPdj.Stats.OutOfOrder
+		s.DjStats.TotalQueued += from.DjStats.TotalQueued
+		s.DjStats.Dups += from.DjStats.Dups
+		s.DjStats.DropOld += from.DjStats.DropOld
+		s.DjStats.OutOfOrder += from.DjStats.OutOfOrder
 
 		s.RTPSampleRate = from.RTPSampleRate
 		s.Rate = from.Rate
@@ -129,10 +129,10 @@ func (s *PktStats) Update(from *PktStats) bool {
 			return true
 		}
 
-		s.RTPdj.Stats.TotalQueued += from.RTPdj.Stats.TotalQueued
-		s.RTPdj.Stats.Dups += from.RTPdj.Stats.Dups
-		s.RTPdj.Stats.DropOld += from.RTPdj.Stats.DropOld
-		s.RTPdj.Stats.OutOfOrder += from.RTPdj.Stats.OutOfOrder
+		s.DjStats.TotalQueued += from.DjStats.TotalQueued
+		s.DjStats.Dups += from.DjStats.Dups
+		s.DjStats.DropOld += from.DjStats.DropOld
+		s.DjStats.OutOfOrder += from.DjStats.OutOfOrder
 
 		s.Pkts += from.Pkts
 		s.Bytes += from.Bytes
@@ -154,14 +154,13 @@ func (s *PktStats) Init() {
 		s.RTPpktTS0.Store(0)
 		s.RTPSeqNo0.Store(0)
 		s.RTPSampleRate = 0
-		s.RTPdj.Reset()
+		s.DjStats = RTPdjStats{}
 	*/
 	s.Reset()
 }
 
 func (s *PktStats) Reset() {
 	*s = PktStats{}
-	s.RTPdj.Reset()
 }
 
 func (s *PktStats) InitRate(t0 timestamp.TS, delta time.Duration) {
@@ -208,14 +207,15 @@ func (s *PktStats) AddPktSz(size uint32) {
 }
 
 func (s *PktStats) AddPkt(pkt []byte, ts timestamp.TS,
-	mediaType MediaType, payloadTypes []uint8, clkRates []uint) {
+	mediaType MediaType, payloadTypes []uint8, clkRates []uint,
+	dj *djBuf) {
 	s.AddPktSz(uint32(len(pkt)))
 	s.UpdateRate(ts)
 	size := counters.Val(len(pkt))
 
 	switch StreamPktType(pkt) {
 	case StPktRTP:
-		s.AddRTPpkt(pkt, ts, mediaType, payloadTypes, clkRates)
+		s.AddRTPpkt(pkt, ts, mediaType, payloadTypes, clkRates, dj)
 	case StPktRTCP:
 		rtpStats.cnts.Inc(rtpStats.rtcpPkts)
 		rtpStats.cnts.Add(rtpStats.rtcpSz, size)
@@ -241,7 +241,8 @@ func (s *PktStats) AddPkt(pkt []byte, ts timestamp.TS,
 }
 
 func (s *PktStats) AddRTPpkt(pkt []byte, ts timestamp.TS,
-	mediaType MediaType, payloadTypes []uint8, clkRates []uint) {
+	mediaType MediaType, payloadTypes []uint8, clkRates []uint,
+	dj *djBuf) {
 	var rtph RTPhdrT
 
 	size := counters.Val(len(pkt))
@@ -277,7 +278,9 @@ func (s *PktStats) AddRTPpkt(pkt []byte, ts timestamp.TS,
 	}
 
 	s.RTPpktTSn = uint32(rtph.TS)
-	s.RTPdj.Add(rtph.SeqNo, rtph.TS)
+	if dj != nil {
+		dj.Add(rtph.SeqNo, rtph.TS, &s.DjStats)
+	}
 	if crtPkts == 1 {
 		if s.RTPrcvdTS0.IsZero() {
 			s.RTPrcvdTS0 = ts

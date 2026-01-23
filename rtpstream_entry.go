@@ -45,6 +45,7 @@ type RTPStreamData struct {
 	Src2       NetInfo        // discovered source
 	StatsSeq   atomic.Uint64  // seqlock for Stats: odd = write in progress
 	Stats      PktStats       // cumulative stats (from beginning of call)
+	RTPdj      djBuf          // de-jitter buffer (used via Stats)
 	PStatsSeq  atomic.Uint64  // seqlock for PStats: odd = write in progress
 	PStats     PktStats       // periodic stats (since last report)
 	Flags      RTPStreamFlags // TODO: atomic type (dbg read & set race)
@@ -165,15 +166,16 @@ func (rd *RTPStreamData) AddPkt(pkt []byte, ts timestamp.TS) {
 	prevRTPbytes := rd.Stats.RTPbytes
 	prevRTPexpected := rd.Stats.RTPexpected
 	prevSSRCchanges := rd.Stats.RTPssrcChanges
-	prevDjQueued := rd.Stats.RTPdj.Stats.TotalQueued
-	prevDjDropOld := rd.Stats.RTPdj.Stats.DropOld
-	prevDjDups := rd.Stats.RTPdj.Stats.Dups
-	prevDjOOO := rd.Stats.RTPdj.Stats.OutOfOrder
+	prevDjQueued := rd.Stats.DjStats.TotalQueued
+	prevDjDropOld := rd.Stats.DjStats.DropOld
+	prevDjDups := rd.Stats.DjStats.Dups
+	prevDjOOO := rd.Stats.DjStats.OutOfOrder
 
 	// Update cumulative stats (increments global rtpStats)
 	rd.StatsBeginWrite()
 	rd.Stats.AddPkt(pkt, ts, rd.Type,
-		rd.Payloads[:rd.PayloadsNo], rd.ClkRates[:rd.PayloadsNo])
+		rd.Payloads[:rd.PayloadsNo], rd.ClkRates[:rd.PayloadsNo],
+		&rd.RTPdj)
 	rd.StatsEndWrite()
 
 	// Update periodic stats with the delta (NO global increment)
@@ -201,10 +203,10 @@ func (rd *RTPStreamData) AddPkt(pkt []byte, ts timestamp.TS) {
 	rd.PStats.Rate = rd.Stats.Rate
 
 	// De-jitter stats delta
-	rd.PStats.RTPdj.Stats.TotalQueued += rd.Stats.RTPdj.Stats.TotalQueued - prevDjQueued
-	rd.PStats.RTPdj.Stats.DropOld += rd.Stats.RTPdj.Stats.DropOld - prevDjDropOld
-	rd.PStats.RTPdj.Stats.Dups += rd.Stats.RTPdj.Stats.Dups - prevDjDups
-	rd.PStats.RTPdj.Stats.OutOfOrder += rd.Stats.RTPdj.Stats.OutOfOrder - prevDjOOO
+	rd.PStats.DjStats.TotalQueued += rd.Stats.DjStats.TotalQueued - prevDjQueued
+	rd.PStats.DjStats.DropOld += rd.Stats.DjStats.DropOld - prevDjDropOld
+	rd.PStats.DjStats.Dups += rd.Stats.DjStats.Dups - prevDjDups
+	rd.PStats.DjStats.OutOfOrder += rd.Stats.DjStats.OutOfOrder - prevDjOOO
 	rd.PStatsEndWrite()
 }
 

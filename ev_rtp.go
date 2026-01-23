@@ -56,7 +56,7 @@ func (evr *EvRTPstreamDataT) fillUnsafe(rs *RTPStreamData) bool {
 	evr.RTPbytes = rs.Stats.RTPbytes
 	evr.RTPpkts = rs.Stats.RTPpkts
 	evr.Expected = rs.Stats.Expected()
-	evr.DjStats = rs.Stats.RTPdj.Stats
+	evr.DjStats = rs.Stats.DjStats
 
 	evr.ClkRate = rs.Stats.RTPSampleRate
 	evr.SSRC = rs.Stats.RTPssrc
