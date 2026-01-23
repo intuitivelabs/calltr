@@ -705,14 +705,14 @@ func (h *RTPStreamHash) PrintFilter(w io.Writer,
 					"  ssrc: %6d (changes: %d)\n",
 					e.Stream.Stats.RTPPayloadType,
 					e.Stream.Stats.RTPSampleRate,
-					e.Stream.Stats.RTPssrc.Load(), e.Stream.Stats.RTPssrcChanges.Load())
+					e.Stream.Stats.RTPssrc, e.Stream.Stats.RTPssrcChanges)
 				fmt.Fprintf(w, "rtp    pkts: %5d  bytes: %9d Kb\n",
-					e.Stream.Stats.RTPpkts.Load(),
-					e.Stream.Stats.RTPbytes.Load()/1024,
+					e.Stream.Stats.RTPpkts,
+					e.Stream.Stats.RTPbytes/1024,
 				)
 				fmt.Fprintf(w, "total  pkts: %5d  bytes: %9d Kb\n",
-					e.Stream.Stats.Pkts.Load(),
-					e.Stream.Stats.Bytes.Load()/1024,
+					e.Stream.Stats.Pkts,
+					e.Stream.Stats.Bytes/1024,
 				)
 				if e.Stream.Stats.Rate.Bytes.Delta != 0 {
 					fmt.Fprintf(w, "       rate:  %7.2f (old: %7.2f) / %s"+

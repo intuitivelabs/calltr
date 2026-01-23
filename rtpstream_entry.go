@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net"
 	"regexp"
+	"runtime"
 	"sync/atomic"
 
 	"github.com/intuitivelabs/timestamp"
@@ -39,9 +40,10 @@ const (
 // RTPStreamData holds one stream
 // (caller or callee)
 type RTPStreamData struct {
-	Dst        NetInfo // destination (e.g. from SDP)
-	Src        NetInfo // expected source (assuming symmetric RTP)
-	Src2       NetInfo // discovered source
+	Dst        NetInfo       // destination (e.g. from SDP)
+	Src        NetInfo       // expected source (assuming symmetric RTP)
+	Src2       NetInfo       // discovered source
+	StatsSeq   atomic.Uint64 // seqlock: odd = write in progress
 	Stats      PktStats
 	Flags      RTPStreamFlags // TODO: atomic type (dbg read & set race)
 	Type       MediaType
@@ -51,6 +53,45 @@ type RTPStreamData struct {
 	ClkRates   [SDPmaxFormats]uint  // corresponding sample rate
 }
 
+// StatsBeginWrite starts a write to Stats (seqlock writer side).
+// Must be called with RTP hash lock held.
+func (rd *RTPStreamData) StatsBeginWrite() {
+	rd.StatsSeq.Add(1) // odd = write in progress
+}
+
+// StatsEndWrite completes a write to Stats (seqlock writer side).
+func (rd *RTPStreamData) StatsEndWrite() {
+	rd.StatsSeq.Add(1) // even = write complete
+}
+
+// StatsRead reads Stats using seqlock (lock-free, may retry).
+// Returns a consistent snapshot of the stats.
+func (rd *RTPStreamData) StatsRead() PktStats {
+	retries := 0
+	for {
+		seq1 := rd.StatsSeq.Load()
+		if seq1&1 != 0 {
+			// write in progress, spin
+			retries++
+			if retries > 5 {
+				runtime.Gosched()
+			}
+			continue
+		}
+		// Copy stats (plain struct copy, no atomics needed)
+		stats := rd.Stats
+		seq2 := rd.StatsSeq.Load()
+		if seq1 == seq2 {
+			return stats
+		}
+		// sequence changed during read, retry
+		retries++
+		if retries > 5 {
+			runtime.Gosched()
+		}
+	}
+}
+
 func (rd *RTPStreamData) String() string {
 	return fmt.Sprintf("%s:%d <- %s:%d (%x)",
 		rd.Dst.IP().String(), rd.Dst.Port,
@@ -58,8 +99,10 @@ func (rd *RTPStreamData) String() string {
 }
 
 func (rd *RTPStreamData) AddPkt(pkt []byte, ts timestamp.TS) {
+	rd.StatsBeginWrite()
 	rd.Stats.AddPkt(pkt, ts, rd.Type,
 		rd.Payloads[:rd.PayloadsNo], rd.ClkRates[:rd.PayloadsNo])
+	rd.StatsEndWrite()
 }
 
 // matchLong returns true if the stream data matches and the data rate.
@@ -82,7 +125,7 @@ func (rd *RTPStreamData) matchLong(rateVal int,
 	if !crtT.IsZero() {
 		delta := rd.Stats.Rate.Bytes.Delta
 		if delta != 0 {
-			v := uint64(rd.Stats.Bytes.Load()) // current value
+			v := uint64(rd.Stats.Bytes) // current value
 			_, crtRate = rd.Stats.Rate.Bytes.ComputeRate(v, crtT, delta)
 			if rateVal > 0 {
 				if !(crtRate >= float64(rateVal)) {

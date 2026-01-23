@@ -51,17 +51,17 @@ func (evr *EvRTPstreamDataT) fillUnsafe(rs *RTPStreamData) bool {
 	evr.RateBytes, _ = rs.Stats.ComputeOverallBytesRate()
 	evr.RateBytesLastS = rs.Stats.Rate.Bytes.Rate
 
-	evr.Bytes = uint32(rs.Stats.Bytes.Load())
-	evr.Pkts = uint32(rs.Stats.Pkts.Load())
-	evr.RTPbytes = uint32(rs.Stats.RTPbytes.Load())
-	evr.RTPpkts = uint32(rs.Stats.RTPpkts.Load())
+	evr.Bytes = rs.Stats.Bytes
+	evr.Pkts = rs.Stats.Pkts
+	evr.RTPbytes = rs.Stats.RTPbytes
+	evr.RTPpkts = rs.Stats.RTPpkts
 	evr.Expected = rs.Stats.Expected()
 	evr.DjStats = rs.Stats.RTPdj.Stats
 
 	evr.ClkRate = rs.Stats.RTPSampleRate
-	evr.SSRC = rs.Stats.RTPssrc.Load()
-	evr.SSRCupd = rs.Stats.RTPssrcChanges.Load()
-	evr.LastSeqNo = uint16(rs.Stats.RTPSeqNo.Load())
+	evr.SSRC = rs.Stats.RTPssrc
+	evr.SSRCupd = rs.Stats.RTPssrcChanges
+	evr.LastSeqNo = uint16(rs.Stats.RTPSeqNo)
 
 	evr.Payload = uint8(rs.Stats.RTPPayloadType)
 	evr.Type = rs.Type
