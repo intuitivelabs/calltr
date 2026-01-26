@@ -43,11 +43,11 @@ type RTPStreamData struct {
 	Dst        NetInfo        // destination (e.g. from SDP)
 	Src        NetInfo        // expected source (assuming symmetric RTP)
 	Src2       NetInfo        // discovered source
-	StatsSeq   atomic.Uint64  // seqlock for stats: odd = write in progress
+	StatsSeq   atomic.Uint32  // seqlock for stats: odd = write in progress
+	PStatsSeq  atomic.Uint32  // seqlock for pstats: odd = write in progress
 	stats      PktStats       // total stats (from beginning of call)
-	RTPdj      djBuf          // de-jitter buffer (used via stats)
-	PStatsSeq  atomic.Uint64  // seqlock for pstats: odd = write in progress
 	pstats     PktStats       // periodic stats (since last report)
+	RTPdj      djBuf          // de-jitter buffer (used via stats)
 	Flags      RTPStreamFlags // TODO: atomic type (dbg read & set race)
 	Type       MediaType
 	Proto      MediaProto
