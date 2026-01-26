@@ -330,6 +330,8 @@ var fake2xxReason = []byte("internal: implied OK")
 
 // Fill EventData from a CallEntry.
 // Returns the number of PFields added. For a valid event, at least 1.
+// Side-effects: it will zero the e.rtpSession.streams[][].pstats field
+// after retrieving the current value (PStatsSwapAndZero()).
 func (d *EventData) Fill(ev EventType, e *CallEntry) int {
 	var forcedReason []byte
 	d.Type = ev
@@ -482,6 +484,8 @@ func (d *EventData) Fill(ev EventType, e *CallEntry) int {
 	}
 	// RTP
 	if e.rtpSession != nil {
+		periodic := (ev == EvRTPstats1)
+
 		streamsNo := len(e.rtpSession.streams)
 		if streamsNo > len(d.RTP) {
 			streamsNo = len(d.RTP)
@@ -490,14 +494,22 @@ func (d *EventData) Fill(ev EventType, e *CallEntry) int {
 			s1 := &e.rtpSession.streams[i][0]
 			s2 := &e.rtpSession.streams[i][1]
 			rtpStreamsHash.LockRTPStreamEntry(s1)
-			{
-				d.RTP[i][0].fillUnsafe(&s1.Stream)
+			if periodic {
+				var lastPStats PktStats
+				s1.Stream.PStatsSwapAndZero(&lastPStats)
+				d.RTP[i][0].fillUnsafe(&s1.Stream, &lastPStats)
+			} else {
+				d.RTP[i][0].fillUnsafe(&s1.Stream, s1.Stream.TotalStats())
 			}
 			rtpStreamsHash.UnlockRTPStreamEntry(s1)
 
 			rtpStreamsHash.LockRTPStreamEntry(s2)
-			{
-				d.RTP[i][1].fillUnsafe(&s2.Stream)
+			if periodic {
+				var lastPStats PktStats
+				s2.Stream.PStatsSwapAndZero(&lastPStats)
+				d.RTP[i][1].fillUnsafe(&s2.Stream, &lastPStats)
+			} else {
+				d.RTP[i][1].fillUnsafe(&s2.Stream, s2.Stream.TotalStats())
 			}
 			rtpStreamsHash.UnlockRTPStreamEntry(s2)
 		}

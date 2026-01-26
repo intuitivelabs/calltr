@@ -199,9 +199,9 @@ func (r *RTPSession) addStreamEntry(e *RTPStreamEntry, h *RTPStreamHash) bool {
 		e.Stream.Flags |= RTPRemovedF // mark it as not-in-hash
 		return false
 	}
-	e.Stream.Stats.Init()
+	e.Stream.TotalStats().Init()
 	now := timestamp.Now()
-	e.Stream.Stats.InitRate(now, time.Second)
+	e.Stream.TotalStats().InitRate(now, time.Second)
 	hashNo := h.HashEntry(e)
 	h.AddTo(hashNo, e)
 	r.StreamAdded(int(e.mline), int(e.side))

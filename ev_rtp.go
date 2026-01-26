@@ -39,31 +39,31 @@ type EvRTPstreamDataT struct {
 	Proto   MediaProto
 }
 
-func (evr *EvRTPstreamDataT) fillUnsafe(rs *RTPStreamData) bool {
+func (evr *EvRTPstreamDataT) fillUnsafe(rs *RTPStreamData, stats *PktStats) bool {
 	evr.Src = rs.Src.IP()
 	evr.SPort = rs.Src.Port
 	evr.Dst = rs.Dst.IP()
 	evr.DPort = rs.Dst.Port
 
-	_, evr.Jitter = rs.Stats.Jitter() // jitter in ms
-	evr.Loss = rs.Stats.Loss()        // percent
-	evr.RateRTPpkts, _ = rs.Stats.ComputeOverallRTPrate()
-	evr.RateBytes, _ = rs.Stats.ComputeOverallBytesRate()
-	evr.RateBytesLastS = rs.Stats.Rate.Bytes.Rate
+	_, evr.Jitter = stats.Jitter() // jitter in ms
+	evr.Loss = stats.Loss()        // percent
+	evr.RateRTPpkts, _ = stats.ComputeOverallRTPrate()
+	evr.RateBytes, _ = stats.ComputeOverallBytesRate()
+	evr.RateBytesLastS = stats.Rate.Bytes.Rate
 
-	evr.Bytes = rs.Stats.Bytes
-	evr.Pkts = rs.Stats.Pkts
-	evr.RTPbytes = rs.Stats.RTPbytes
-	evr.RTPpkts = rs.Stats.RTPpkts
-	evr.Expected = rs.Stats.Expected()
-	evr.DjStats = rs.Stats.DjStats
+	evr.Bytes = stats.Bytes
+	evr.Pkts = stats.Pkts
+	evr.RTPbytes = stats.RTPbytes
+	evr.RTPpkts = stats.RTPpkts
+	evr.Expected = stats.Expected()
+	evr.DjStats = stats.DjStats
 
-	evr.ClkRate = rs.Stats.RTPSampleRate
-	evr.SSRC = rs.Stats.RTPssrc
-	evr.SSRCupd = rs.Stats.RTPssrcChanges
-	evr.LastSeqNo = uint16(rs.Stats.RTPSeqNo)
+	evr.ClkRate = stats.RTPSampleRate
+	evr.SSRC = stats.RTPssrc
+	evr.SSRCupd = stats.RTPssrcChanges
+	evr.LastSeqNo = uint16(stats.RTPSeqNo)
 
-	evr.Payload = uint8(rs.Stats.RTPPayloadType)
+	evr.Payload = uint8(stats.RTPPayloadType)
 	evr.Type = rs.Type
 	evr.Proto = rs.Proto
 	return true

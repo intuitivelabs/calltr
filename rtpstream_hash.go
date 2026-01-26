@@ -582,16 +582,16 @@ func (h *RTPStreamHash) updateStatsAndRefCallEntry(dst, src NetInfo,
 				}
 			}
 			if set {
-				rtpEntry.Stream.Stats.Set(newStats, false)
+				rtpEntry.Stream.TotalStats().Set(newStats, false)
 				ret = true
 			} else {
-				ret = rtpEntry.Stream.Stats.Update(newStats)
+				ret = rtpEntry.Stream.TotalStats().Update(newStats)
 			}
 			if newStats.RTPSampleRate == 0 {
 				// fix sample rate (depends on the negotiated
 				// codecs and clk rates)
 				payloadsNo := rtpEntry.Stream.PayloadsNo
-				rtpEntry.Stream.Stats.RTPSampleRate =
+				rtpEntry.Stream.TotalStats().RTPSampleRate =
 					FindSampleRate(newStats.RTPPayloadType,
 						rtpEntry.Stream.Type,
 						rtpEntry.Stream.Payloads[:payloadsNo],
@@ -696,35 +696,36 @@ func (h *RTPStreamHash) PrintFilter(w io.Writer,
 			print, rate := e.Stream.matchLong(rateVal, net, re, now)
 			if print && n >= start {
 				printed++
+				stats := e.Stream.TotalStats()
 				fmt.Fprintf(w, "%6d. %s created %s (%s ago)\n",
 					n, e.String(),
-					e.Stream.Stats.Rate.T0.Truncate(time.Second),
-					now.Sub(e.Stream.Stats.Rate.T0).Truncate(time.Second),
+					stats.Rate.T0.Truncate(time.Second),
+					now.Sub(stats.Rate.T0).Truncate(time.Second),
 				)
 				fmt.Fprintf(w, "rtp    payload: %d  clk rate: %6d"+
 					"  ssrc: %6d (changes: %d)\n",
-					e.Stream.Stats.RTPPayloadType,
-					e.Stream.Stats.RTPSampleRate,
-					e.Stream.Stats.RTPssrc, e.Stream.Stats.RTPssrcChanges)
+					stats.RTPPayloadType,
+					stats.RTPSampleRate,
+					stats.RTPssrc, stats.RTPssrcChanges)
 				fmt.Fprintf(w, "rtp    pkts: %5d  bytes: %9d Kb\n",
-					e.Stream.Stats.RTPpkts,
-					e.Stream.Stats.RTPbytes/1024,
+					stats.RTPpkts,
+					stats.RTPbytes/1024,
 				)
 				fmt.Fprintf(w, "total  pkts: %5d  bytes: %9d Kb\n",
-					e.Stream.Stats.Pkts,
-					e.Stream.Stats.Bytes/1024,
+					stats.Pkts,
+					stats.Bytes/1024,
 				)
-				if e.Stream.Stats.Rate.Bytes.Delta != 0 {
+				if stats.Rate.Bytes.Delta != 0 {
 					fmt.Fprintf(w, "       rate:  %7.2f (old: %7.2f) / %s"+
 						" (u: %v ago)\n",
-						rate, e.Stream.Stats.Rate.Bytes.Rate,
-						e.Stream.Stats.Rate.Bytes.Delta,
-						now.Sub(e.Stream.Stats.Rate.Bytes.Updated))
+						rate, stats.Rate.Bytes.Rate,
+						stats.Rate.Bytes.Delta,
+						now.Sub(stats.Rate.Bytes.Updated))
 
 				}
-				if e.Stream.Stats.RTPSampleRate != 0 {
-					jitter, jitterMS := e.Stream.Stats.Jitter()
-					loss := e.Stream.Stats.Loss()
+				if stats.RTPSampleRate != 0 {
+					jitter, jitterMS := stats.Jitter()
+					loss := stats.Loss()
 					fmt.Fprintf(w, "       jitter:%7.2f (%7.2f ms)"+
 						" loss: %2.2f%%\n",
 						jitter, jitterMS, loss)
