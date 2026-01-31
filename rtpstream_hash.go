@@ -581,6 +581,11 @@ func (h *RTPStreamHash) updateStatsAndRefCallEntry(dst, src NetInfo,
 					// (since it would require locking ce)
 				}
 			}
+			// Capture counters before update (for pstats delta)
+			prevStats := *rtpEntry.Stream.TotalStats()
+
+			// Update total stats with seqlock protection
+			rtpEntry.Stream.StatsBeginWrite()
 			if set {
 				rtpEntry.Stream.TotalStats().Set(newStats, false)
 				ret = true
@@ -596,6 +601,46 @@ func (h *RTPStreamHash) updateStatsAndRefCallEntry(dst, src NetInfo,
 						rtpEntry.Stream.Type,
 						rtpEntry.Stream.Payloads[:payloadsNo],
 						rtpEntry.Stream.ClkRates[:payloadsNo])
+			}
+			rtpEntry.Stream.StatsEndWrite()
+
+			// Update periodic stats with deltas (if total stats updated)
+			if ret {
+				stats := rtpEntry.Stream.TotalStats()
+				pstats := rtpEntry.Stream.PeriodicStats()
+
+				rtpEntry.Stream.PStatsBeginWrite()
+
+				// Counter deltas
+				pstats.Pkts += stats.Pkts - prevStats.Pkts
+				pstats.Bytes += stats.Bytes - prevStats.Bytes
+				pstats.RTPpkts += stats.RTPpkts - prevStats.RTPpkts
+				pstats.RTPbytes += stats.RTPbytes - prevStats.RTPbytes
+				pstats.RTPexpected += stats.RTPexpected - prevStats.RTPexpected
+				pstats.RTPssrcChanges += stats.RTPssrcChanges - prevStats.RTPssrcChanges
+
+				// Timestamps
+				if pstats.RTPrcvdTS0.IsZero() {
+					pstats.RTPrcvdTS0 = stats.RTPrcvdTS0
+				}
+				pstats.RTPrcvdTSn = stats.RTPrcvdTSn
+
+				// Latest values (not deltas)
+				pstats.RTPpktTSn = stats.RTPpktTSn
+				pstats.RTPSeqNo = stats.RTPSeqNo
+				pstats.RTPJitter16 = stats.RTPJitter16
+				pstats.RTPSampleRate = stats.RTPSampleRate
+				pstats.RTPPayloadType = stats.RTPPayloadType
+				pstats.RTPssrc = stats.RTPssrc
+				pstats.Rate = stats.Rate
+
+				// De-jitter stats delta
+				pstats.DjStats.TotalQueued += stats.DjStats.TotalQueued - prevStats.DjStats.TotalQueued
+				pstats.DjStats.DropOld += stats.DjStats.DropOld - prevStats.DjStats.DropOld
+				pstats.DjStats.Dups += stats.DjStats.Dups - prevStats.DjStats.Dups
+				pstats.DjStats.OutOfOrder += stats.DjStats.OutOfOrder - prevStats.DjStats.OutOfOrder
+
+				rtpEntry.Stream.PStatsEndWrite()
 			}
 		} // else rtpEntry == nil => no entry found for the packet
 	}
