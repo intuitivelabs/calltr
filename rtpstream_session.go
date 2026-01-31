@@ -193,7 +193,7 @@ func (r *RTPSession) addStreamEntry(e *RTPStreamEntry, h *RTPStreamHash) bool {
 		return false
 	}
 	if e.hashNo.Load() != RTPHashNone || !e.Detached() {
-		BUG("trying to add entry %d side %d flags %d detached %d "+
+		BUG("trying to add entry %d side %d flags %d detached %v "+
 			" hash: %d with wrong hash or not detached\n",
 			e.mline, e.side, e.Stream.Flags, e.Detached(), e.hashNo.Load())
 		e.Stream.Flags |= RTPRemovedF // mark it as not-in-hash

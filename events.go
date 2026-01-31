@@ -179,7 +179,7 @@ type HandleEvF func(callev *EventData)
 // HandleNewCev is a function callback that is called every time a new
 // call based event appears.
 // The parameters are the event type, the CallEntry that
-// triggered the event, the souce and destination (IP, port, protocol).
+// triggered the event, the source and destination (IP, port, protocol).
 // Note that the CallEntry must be treated as read-only
 // and no reference to it should be kept after the callback returns.
 // If a reference must be kept then the callback should call e.Ref()
@@ -652,9 +652,9 @@ func (d *EventData) FillFromRegEntry(ev EventType, e *RegEntry) int {
 		d.ReplStatus = 408
 		forcedReason = fakeTimeoutReason
 	case EvRegDel, EvRegNew:
-		// the event should be directly generated fron the Register reply
+		// the event should be directly generated from the Register reply
 		// and Fill-ed from the CallEntry, not from here
-		// (whe don't have all the information)
+		// (we don't have all the information)
 		// However if called, try to fake something
 		d.ReplStatus = 292
 		forcedReason = fake2xxReason

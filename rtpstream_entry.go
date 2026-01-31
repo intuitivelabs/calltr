@@ -283,9 +283,12 @@ func (rsd *RTPStreamData) SetDstFromMediaDesc(md *MediaDesc,
 	if !setNetInfofromMediaDesc(&rsd.Dst, md, fbkC) {
 		ret = false
 		if fbkC != nil {
+			side := 0
+			if (rsd.Flags&RTPSCallerF) == RTPSCallerF {
+				side = 1
+			}
 			ERR("failed to set IP for stream %p side %d from %q fallback %q\n",
-				rsd, (rsd.Flags&RTPSCallerF) == RTPSCallerF,
-				md.C.String(), fbkC.String())
+				rsd,side, md.C.String(), fbkC.String())
 		} else {
 			ERR("failed to set IP for stream %p side %d from %s\n",
 				rsd, rsd.Flags&RTPSCalleeF,

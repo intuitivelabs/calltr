@@ -345,7 +345,7 @@ func (h *RTPStreamHash) GetBestMatchCallid(dst, src NetInfo,
 				origSz = len(cid)
 				UnlockCallEntry(ce)
 			} else {
-				WARN("failed to lock callentry %p (removed from hash?)\n")
+				WARN("failed to lock callentry %p (removed from hash?)\n", ce)
 				// return not found since the callentry is about to
 				// be destroyed
 				match = RTPNoMatch
@@ -390,7 +390,7 @@ func (h *RTPStreamHash) GetBestMatchStream(dst, src NetInfo) (RTPMatchT, *RTPStr
 				rs.Ref()
 			} else {
 				BUG("hashed stream %p (%s) with nil parent session\n",
-					res, res.String(), rs)
+					res, res.String())
 			}
 		}
 	}
@@ -453,7 +453,7 @@ func (h *RTPStreamHash) ProcessPkt(dst, src NetInfo,
 			origSz = len(cid)
 			UnlockCallEntry(ce)
 		} else {
-			WARN("failed to lock callentry %p" +
+			WARN("failed to lock callentry %p"+
 				" (removed from hash?)\n", ce)
 		}
 		ce.Unref()
@@ -620,7 +620,7 @@ func (h *RTPStreamHash) updateStatsAndRefCallEntry(dst, src NetInfo,
 				}
 				UnlockCallEntry(ce)
 			} else {
-				WARN("failed to lock callentry %p" +
+				WARN("failed to lock callentry %p"+
 					" (removed from hash?)\n", ce)
 			}
 		}
