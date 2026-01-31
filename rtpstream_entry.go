@@ -172,42 +172,27 @@ func (rd *RTPStreamData) String() string {
 		rd.Src.IP().String(), rd.Src.Port, rd.Flags)
 }
 
-func (rd *RTPStreamData) AddPkt(pkt []byte, ts timestamp.TS) {
-	// Capture counters before update
-	prevPkts := rd.stats.Pkts
-	prevBytes := rd.stats.Bytes
-	prevRTPpkts := rd.stats.RTPpkts
-	prevRTPbytes := rd.stats.RTPbytes
-	prevRTPexpected := rd.stats.RTPexpected
-	prevSSRCchanges := rd.stats.RTPssrcChanges
-	prevDjQueued := rd.stats.DjStats.TotalQueued
-	prevDjDropOld := rd.stats.DjStats.DropOld
-	prevDjDups := rd.stats.DjStats.Dups
-	prevDjOOO := rd.stats.DjStats.OutOfOrder
-
-	// Update cumulative stats (increments global rtpStats)
-	rd.StatsBeginWrite()
-	rd.stats.AddPkt(pkt, ts, rd.Type,
-		rd.Payloads[:rd.PayloadsNo], rd.ClkRates[:rd.PayloadsNo],
-		&rd.RTPdj)
-	rd.StatsEndWrite()
-
-	// Update periodic stats with the delta (NO global increment)
+// updatePStats updates periodic stats based on the delta between current
+// total stats and the previous stats snapshot. Must be called with RTP hash
+// lock held (for seqlock writer protection).
+func (rd *RTPStreamData) updatePStats(prevStats *PktStats) {
 	rd.PStatsBeginWrite()
-	rd.pstats.Pkts += rd.stats.Pkts - prevPkts
-	rd.pstats.Bytes += rd.stats.Bytes - prevBytes
-	rd.pstats.RTPpkts += rd.stats.RTPpkts - prevRTPpkts
-	rd.pstats.RTPbytes += rd.stats.RTPbytes - prevRTPbytes
-	rd.pstats.RTPexpected += rd.stats.RTPexpected - prevRTPexpected
-	rd.pstats.RTPssrcChanges += rd.stats.RTPssrcChanges - prevSSRCchanges
 
-	// Update period timestamps
+	// Counter deltas
+	rd.pstats.Pkts += rd.stats.Pkts - prevStats.Pkts
+	rd.pstats.Bytes += rd.stats.Bytes - prevStats.Bytes
+	rd.pstats.RTPpkts += rd.stats.RTPpkts - prevStats.RTPpkts
+	rd.pstats.RTPbytes += rd.stats.RTPbytes - prevStats.RTPbytes
+	rd.pstats.RTPexpected += rd.stats.RTPexpected - prevStats.RTPexpected
+	rd.pstats.RTPssrcChanges += rd.stats.RTPssrcChanges - prevStats.RTPssrcChanges
+
+	// Timestamps
 	if rd.pstats.RTPrcvdTS0.IsZero() {
 		rd.pstats.RTPrcvdTS0 = rd.stats.RTPrcvdTS0
 	}
 	rd.pstats.RTPrcvdTSn = rd.stats.RTPrcvdTSn
 
-	// Copy latest values
+	// Latest values (not deltas)
 	rd.pstats.RTPpktTSn = rd.stats.RTPpktTSn
 	rd.pstats.RTPSeqNo = rd.stats.RTPSeqNo
 	rd.pstats.RTPJitter16 = rd.stats.RTPJitter16
@@ -217,11 +202,27 @@ func (rd *RTPStreamData) AddPkt(pkt []byte, ts timestamp.TS) {
 	rd.pstats.Rate = rd.stats.Rate
 
 	// De-jitter stats delta
-	rd.pstats.DjStats.TotalQueued += rd.stats.DjStats.TotalQueued - prevDjQueued
-	rd.pstats.DjStats.DropOld += rd.stats.DjStats.DropOld - prevDjDropOld
-	rd.pstats.DjStats.Dups += rd.stats.DjStats.Dups - prevDjDups
-	rd.pstats.DjStats.OutOfOrder += rd.stats.DjStats.OutOfOrder - prevDjOOO
+	rd.pstats.DjStats.TotalQueued += rd.stats.DjStats.TotalQueued - prevStats.DjStats.TotalQueued
+	rd.pstats.DjStats.DropOld += rd.stats.DjStats.DropOld - prevStats.DjStats.DropOld
+	rd.pstats.DjStats.Dups += rd.stats.DjStats.Dups - prevStats.DjStats.Dups
+	rd.pstats.DjStats.OutOfOrder += rd.stats.DjStats.OutOfOrder - prevStats.DjStats.OutOfOrder
+
 	rd.PStatsEndWrite()
+}
+
+func (rd *RTPStreamData) AddPkt(pkt []byte, ts timestamp.TS) {
+	// Capture stats before update
+	prevStats := rd.stats
+
+	// Update cumulative stats (increments global rtpStats)
+	rd.StatsBeginWrite()
+	rd.stats.AddPkt(pkt, ts, rd.Type,
+		rd.Payloads[:rd.PayloadsNo], rd.ClkRates[:rd.PayloadsNo],
+		&rd.RTPdj)
+	rd.StatsEndWrite()
+
+	// Update periodic stats with the delta
+	rd.updatePStats(&prevStats)
 }
 
 // matchLong returns true if the stream data matches and the data rate.
