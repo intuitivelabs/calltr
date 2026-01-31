@@ -124,6 +124,7 @@ func csTimer(wt *wtimer.WTimer, h *wtimer.TimerLnk,
 	statsT := timestamp.AtomicLoad(&cs.Timer.StatsT)
 	src := cs.EndPoint[0]
 	dst := cs.EndPoint[1]
+	noPeriodicStats := cs.EvFlags&EvNoPeriodicStatsF != 0
 	cstHash.HTable[cs.hashNo].Unlock()
 
 	/* DBG start timer drift  -- TODO: add some counters
@@ -190,11 +191,11 @@ func csTimer(wt *wtimer.WTimer, h *wtimer.TimerLnk,
 				// stats timeout
 				// generate stats event
 				// Note: cs.evHandler is obsolete an no longer supported
-				if statsInt != 0 && cEvHandler != nil {
+				if statsInt != 0 && cEvHandler != nil && !noPeriodicStats {
 					ev := EvRTPstats1
 					cEvHandler(ev, cs, src, dst)
 				}
-				if statsInt != 0 {
+				if statsInt != 0 && !noPeriodicStats {
 					nextStatsT = now.Add(statsInt)
 				} else {
 					nextStatsT = timestamp.Zero()

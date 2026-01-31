@@ -111,6 +111,11 @@ const (
 	EvRTPstats2F EventFlags = (EventFlags)(1) << EvRTPstats2
 
 	EvRegMaskF EventFlags = EvRegNewF | EvRegDelF | EvRegExpiredF
+
+	// EvNoPeriodicStatsF disables periodic RTP stats generation for this call.
+	// Used when IPFIX fast events are enabled (stats are sent immediately).
+	// Uses bit 31 to avoid conflict with event type bits (0-20).
+	EvNoPeriodicStatsF EventFlags = 1 << 31
 )
 
 // returns previous value
@@ -151,6 +156,14 @@ func (f EventFlags) String() string {
 			} else {
 				s += e.String()
 			}
+		}
+	}
+	// Check special flags that are not event types
+	if f&EvNoPeriodicStatsF != 0 {
+		if s != "" {
+			s += "|no-periodic-stats"
+		} else {
+			s = "no-periodic-stats"
 		}
 	}
 	return s

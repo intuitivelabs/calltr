@@ -454,7 +454,7 @@ func (h *RTPStreamHash) ProcessPkt(dst, src NetInfo,
 			UnlockCallEntry(ce)
 		} else {
 			WARN("failed to lock callentry %p" +
-				" (removed from hash?)\n")
+				" (removed from hash?)\n", ce)
 		}
 		ce.Unref()
 	}
@@ -487,7 +487,7 @@ func (h *RTPStreamHash) SetStatsAndRefCallEntry(dst, src NetInfo,
 	outCE **CallEntry) (RTPMatchT, int, int) {
 	m, n, sz, _ :=
 		h.updateStatsAndRefCallEntry(dst, src, newStats, true,
-			dstCallid, ceSrc, ceDst, outCE)
+			dstCallid, ceSrc, ceDst, outCE, false)
 	return m, n, sz
 }
 
@@ -516,9 +516,9 @@ func (h *RTPStreamHash) SetStatsAndRefCallEntry(dst, src NetInfo,
 // The caller should check if the callid did fit fully in the provided slice.
 func (h *RTPStreamHash) UpdateStatsAndRefCallEntry(dst, src NetInfo,
 	newStats *PktStats, dstCallid []byte, ceSrc, ceDst *NetInfo,
-	outCE **CallEntry) (RTPMatchT, int, int, bool) {
+	outCE **CallEntry, disablePeriodicStats bool) (RTPMatchT, int, int, bool) {
 	return h.updateStatsAndRefCallEntry(dst, src, newStats, false,
-		dstCallid, ceSrc, ceDst, outCE)
+		dstCallid, ceSrc, ceDst, outCE, disablePeriodicStats)
 }
 
 // updateStatsAndRefCallEntry sets or updates the statistics for the
@@ -529,13 +529,13 @@ func (h *RTPStreamHash) UpdateStatsAndRefCallEntry(dst, src NetInfo,
 // It is an internal function used by SetStatsAndRefCallEntry and
 // UpdateStatsAndRefCallEntry.
 // It's purpose is to support external updates for the rtp streams
-// (e.g. receving rtp qos records/info without seeing the rtp packets).
+// (e.g. receiving rtp qos records/info without seeing the rtp packets).
 // It looks for the best matching entry, sets the statistics to the provided
 // values, copies the matching callid (if a match is found and dstCallid
 // is not nil), and returns a referenced CallEntry (if a match is found
 // and outCE is not nil).
 // If "set" is true it will set the statistics and if false it will update
-// them if the time intervals are not overlaping.
+// them if the time intervals are not overlapping.
 //
 // WARNING: if outCE is not nil, the caller of this function gets
 // ownership of a CallEntry reference and it is its responsibility
@@ -552,7 +552,7 @@ func (h *RTPStreamHash) UpdateStatsAndRefCallEntry(dst, src NetInfo,
 func (h *RTPStreamHash) updateStatsAndRefCallEntry(dst, src NetInfo,
 	newStats *PktStats, set bool,
 	dstCallid []byte, ceSrc, ceDst *NetInfo,
-	outCE **CallEntry) (RTPMatchT, int, int, bool) {
+	outCE **CallEntry, disablePeriodicStats bool) (RTPMatchT, int, int, bool) {
 	var match RTPMatchT
 	var copied, origSz int
 	var ret bool
@@ -601,8 +601,12 @@ func (h *RTPStreamHash) updateStatsAndRefCallEntry(dst, src NetInfo,
 	}
 	h.HTable[hash].Unlock()
 	if ce != nil {
-		if len(dstCallid) != 0 || ceSrc != nil || ceDst != nil {
+		if len(dstCallid) != 0 || ceSrc != nil || ceDst != nil ||
+			disablePeriodicStats {
 			if LockCallEntry(ce) {
+				if disablePeriodicStats {
+					ce.EvFlags |= EvNoPeriodicStatsF
+				}
 				if len(dstCallid) != 0 {
 					cid := ce.Key.GetCallID()
 					copied = copy(dstCallid, cid)
@@ -617,7 +621,7 @@ func (h *RTPStreamHash) updateStatsAndRefCallEntry(dst, src NetInfo,
 				UnlockCallEntry(ce)
 			} else {
 				WARN("failed to lock callentry %p" +
-					" (removed from hash?)\n")
+					" (removed from hash?)\n", ce)
 			}
 		}
 		if outCE != nil {
