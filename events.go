@@ -497,7 +497,7 @@ func (d *EventData) Fill(ev EventType, e *CallEntry) int {
 	}
 	// RTP
 	if e.rtpSession != nil {
-		periodic := (ev == EvRTPstats1)
+		periodic := (ev == EvRTPstats1 || ev == EvRTPstats2)
 
 		streamsNo := len(e.rtpSession.streams)
 		if streamsNo > len(d.RTP) {
