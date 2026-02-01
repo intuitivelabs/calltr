@@ -606,7 +606,8 @@ func (h *RTPStreamHash) updateStatsAndRefCallEntry(dst, src NetInfo,
 
 			// Update periodic stats with deltas (if total stats updated)
 			if ret {
-				rtpEntry.Stream.updatePStats(&prevStats)
+				rtpEntry.Stream.updatePStats(&prevStats,
+					newStats.RTPrcvdTS0, newStats.RTPpktTS0)
 			}
 		} // else rtpEntry == nil => no entry found for the packet
 	}

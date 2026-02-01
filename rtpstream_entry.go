@@ -175,7 +175,8 @@ func (rd *RTPStreamData) String() string {
 // updatePStats updates periodic stats based on the delta between current
 // total stats and the previous stats snapshot. Must be called with RTP hash
 // lock held (for seqlock writer protection).
-func (rd *RTPStreamData) updatePStats(prevStats *PktStats) {
+func (rd *RTPStreamData) updatePStats(prevStats *PktStats,
+	rcvdTS timestamp.TS, pktTS uint32) {
 	rd.PStatsBeginWrite()
 
 	// Counter deltas
@@ -188,7 +189,11 @@ func (rd *RTPStreamData) updatePStats(prevStats *PktStats) {
 
 	// Timestamps
 	if rd.pstats.RTPrcvdTS0.IsZero() {
-		rd.pstats.RTPrcvdTS0 = rd.stats.RTPrcvdTS0
+		/* if rtp receive timestamp was reset => a new periodic stats interval has
+		   started -> first RTP packet timestamp in this new period must be updated
+		*/
+		rd.pstats.RTPrcvdTS0 = rcvdTS
+		rd.pstats.RTPpktTS0 = pktTS
 	}
 	rd.pstats.RTPrcvdTSn = rd.stats.RTPrcvdTSn
 
@@ -222,7 +227,7 @@ func (rd *RTPStreamData) AddPkt(pkt []byte, ts timestamp.TS) {
 	rd.StatsEndWrite()
 
 	// Update periodic stats with the delta
-	rd.updatePStats(&prevStats)
+	rd.updatePStats(&prevStats, rd.stats.RTPrcvdTSn, rd.stats.RTPpktTSn)
 }
 
 // matchLong returns true if the stream data matches and the data rate.
