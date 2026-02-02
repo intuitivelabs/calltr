@@ -27,7 +27,7 @@ func TestCallStateAllocFree(t *testing.T) {
 				t.Errorf("wrong buf size %d, expected at least %d\n",
 					len(e.Key.buf), sz)
 			}
-			/* usefull only if everything is allocated into one block
+			/* useful only if everything is allocated into one block
 			(AllocCallsPerEntry == 1), e.g.  build with alloc_oneblock */
 			if AllocCallsPerEntry == 1 && len(e.Key.buf) != 0 &&
 				uintptr(unsafe.Pointer(&(e.Key.buf[0]))) !=
@@ -74,7 +74,7 @@ func TestCallStateAlloc(t *testing.T) {
 			t.Errorf("wrong buf size %d, expected at least %d\n",
 				len(e.Key.buf), sz)
 		}
-		/* usefull only if everything is allocated into one block
+		/* useful only if everything is allocated into one block
 		(AllocCallsPerEntry == 1), e.g.  build with alloc_oneblock */
 		if AllocCallsPerEntry == 1 && len(e.Key.buf) != 0 &&
 			uintptr(unsafe.Pointer(&(e.Key.buf[0]))) !=
@@ -136,7 +136,7 @@ func TestCallStateAllocLstGC(t *testing.T) {
 			t.Errorf("wrong buf size %d, expected at least %d\n",
 				len(e.Key.buf), sz)
 		}
-		/* usefull only if everything is allocated into one block
+		/* useful only if everything is allocated into one block
 		(AllocCallsPerEntry == 1), e.g.  build with alloc_oneblock */
 		if AllocCallsPerEntry == 1 && len(e.Key.buf) != 0 &&
 			uintptr(unsafe.Pointer(&(e.Key.buf[0]))) !=
@@ -192,8 +192,8 @@ func TestCallStateAllocLstGC(t *testing.T) {
 		// if GC does not see our list elems as CallEntry => it will free
 		// all of them, except for the one pointed by lst.head and lst.prev
 		// => BadGCEntries would be N -2
-		t.Errorf("list entries garabage collected when they should have"+
-			"been still reachabled: gc entries %d/%d not freed %d\n",
+		t.Errorf("list entries garbage collected when they should have"+
+			"been still reachable: gc entries %d/%d not freed %d\n",
 			GCentries, N, BadGCEntries)
 	}
 	t.Logf("before freeing lists (%d elems)\n", i)
@@ -211,7 +211,7 @@ func TestCallStateAllocLstGC(t *testing.T) {
 	for n := 0; n < GCRuns; n++ {
 		runtime.GC()
 		if AllocType == AllocPool {
-			// run GC() a 2nd time to force sync.pool emptrying:
+			// run GC() a 2nd time to force sync.pool emptying:
 			// pool use a 2-level caching of used blocks: a local per
 			// processor and a victim "cache".
 			// On each GC() cycle the victim cache is emptied (GCed) and
@@ -325,8 +325,8 @@ func TestEvRateAllocLstGC(t *testing.T) {
 		// if GC does not see our list elems as CallEntry => it will free
 		// all of them, except for the one pointed by lst.head and lst.prev
 		// => BadGCEntries would be N -2
-		t.Errorf("list entries garabage collected when they should have"+
-			"been still reachabled: gc entries %d/%d not freed %d\n",
+		t.Errorf("list entries garbage collected when they should have"+
+			"been still reachable: gc entries %d/%d not freed %d\n",
 			GCentries, N, BadGCEntries)
 	}
 	t.Logf("before freeing lists (%d elems)\n", i)
@@ -340,7 +340,7 @@ func TestEvRateAllocLstGC(t *testing.T) {
 	for n := 0; n < GCRuns; n++ {
 		runtime.GC()
 		if AllocType == AllocPool || AllocType == AllocOneBlock {
-			// run GC() a 2nd time to force sync.pool emptrying:
+			// run GC() a 2nd time to force sync.pool emptying:
 			// pool use a 2-level caching of used blocks: a local per
 			// processor and a victim "cache".
 			// On each GC() cycle the victim cache is emptied (GCed) and

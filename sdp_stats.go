@@ -116,7 +116,7 @@ func (s *sdpStatsT) Init() bool {
 			"number of update SDP attempts with the same content"},
 
 		{&s.cloned, 0, nil, nil, "cloned",
-			"SDP entries succesfully cloned during forking"},
+			"SDP entries successfully cloned during forking"},
 		{&s.cloneFail, 0, nil, nil, "clone_fail",
 			"SDP entries clone operation failures"},
 		{&s.allocFail, 0, nil, nil, "alloc_fail",

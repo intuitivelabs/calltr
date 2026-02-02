@@ -465,7 +465,7 @@ func (h *RTPStreamHash) ProcessPkt(dst, src NetInfo,
 // SetStatsAndRefCallEntry sets the statistics for the matching rtp stream
 // and allows retrieving the matching referenced CallEntry.
 // It's purpose is to support external updates for the rtp streams
-// (e.g. receving rtp qos records/info without seeing the rtp packets).
+// (e.g. receiving rtp qos records/info without seeing the rtp packets).
 // It looks for the best matching entry, sets the statistics to the provided
 // values, copies the matching callid (if a match is found and dstCallid
 // is not nil), the source and destination addresses and returns a
@@ -495,7 +495,7 @@ func (h *RTPStreamHash) SetStatsAndRefCallEntry(dst, src NetInfo,
 // matching rtp stream and allows retrieving the matching referenced
 // CallEntry.
 // It's purpose is to support external updates for the rtp streams
-// (e.g. receving rtp qos records/info without seeing the rtp packets).
+// (e.g. receiving rtp qos records/info without seeing the rtp packets).
 // It looks for the best matching entry, updates the statistics to the
 // provided values, copies the matching callid (if a match is found
 // and dstCallid is not nil), the source and destination addresses
@@ -694,7 +694,7 @@ func (h *RTPStreamHash) Stats() HStats {
 // Parameters:
 // start - skip start matching entries
 // max   - stop after printing max entries
-// rateVal - rate value as interger. The comparison direction is given by
+// rateVal - rate value as integer. The comparison direction is given by
 //            the sign (+ get rates >= rateVal, - get rates < -rateVal)
 // net   - ip network to match against
 // re    - if set, a regexp to match the IP against

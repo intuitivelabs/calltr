@@ -1101,7 +1101,7 @@ errorLocked:
 	return nil, CallErrMatch, 0, EvNone, EvSDPNone
 }
 
-// Track will start calll-tracking the passed message.
+// Track will start call-tracking the passed message.
 // It returns true on success and whether or not the message matched an existing call:
 //
 //	CallNoMatch (new call-entry was created),

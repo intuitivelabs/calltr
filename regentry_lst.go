@@ -326,8 +326,8 @@ func (lst *RegEntryLst) Detached(r *RegEntry) bool {
 	return r == r.next
 }
 
-// ForEach iterates on the entrie list calling f(e) for each element,
-// until f(e) returns false or the lists ends.
+// ForEach iterates on the entries list calling f(e) for each element,
+// until f(e) returns false or the list ends.
 // WARNING: removing the current element from f is not supported, use
 //          ForEachSafeRm() for that.
 func (lst *RegEntryLst) ForEach(f func(e *RegEntry) bool) {
@@ -337,8 +337,8 @@ func (lst *RegEntryLst) ForEach(f func(e *RegEntry) bool) {
 	}
 }
 
-// ForEachSafeRm iterates on the entrie list calling f(e) for each element,
-// until f(e) returns false or the lists ends.
+// ForEachSafeRm iterates on the entries list calling f(e) for each element,
+// until f(e) returns false or the list ends.
 // Removing the current element from f is  _supported_.
 func (lst *RegEntryLst) ForEachSafeRm(f func(e *RegEntry) bool) {
 	cont := true
@@ -350,7 +350,7 @@ func (lst *RegEntryLst) ForEachSafeRm(f func(e *RegEntry) bool) {
 
 // FindUriUnsafe searches the list for a matching aor uri and returns the
 // corresponding RegEntry. It does not use any locking (call it between
-//  Lock/Unlock() to be safe).
+// Lock/Unlock() to be safe).
 // If no matching entry is found it returns nil
 func (lst *RegEntryLst) FindURIUnsafe(uri *sipsp.PsipURI, buf []byte) *RegEntry {
 	for e := lst.head.next; e != &lst.head; e = e.next {
@@ -387,7 +387,7 @@ func (lst *RegEntryLst) MatchURIUnsafe(uri *sipsp.PsipURI, buf []byte,
 
 // FindBindingUnsafe searches the list for a RegEntry matching the aor and
 // contact URIs.  It does not use any locking (call it between
-//  Lock/Unlock() to be safe).
+// Lock/Unlock() to be safe).
 // If no matching entry is found it returns nil
 func (lst *RegEntryLst) FindBindingUnsafe(aor *sipsp.PsipURI, abuf []byte,
 	contact *sipsp.PsipURI, cbuf []byte) *RegEntry {
