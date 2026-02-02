@@ -112,6 +112,9 @@ func (s *PktStats) Update(from *PktStats) bool {
 		s.RTPexpected += from.RTPexpected
 		s.RTPSeqNo = from.RTPSeqNo
 		// s.RTPSeqNo0 remains the same
+
+		// use jitter from passed statistics
+		// (option: compute it if 0)
 		s.RTPJitter16 = from.RTPJitter16
 		return true
 	}
@@ -304,24 +307,41 @@ func (s *PktStats) AddRTPpkt(pkt []byte, ts timestamp.TS,
 		}
 		// compute delay, jitter, but only if packet is newer than the last one
 		// (taking into account possible 16 bit wrap around)
-		if (s.RTPSampleRate > 0) && prevSeqNo.Less(rtph.SeqNo) {
-			dRcvdTS := ts - prevRcvdTS
-			dPktTS := rtph.TS - prevPktTS
-			// check if timestamps not too far away
-			if (dRcvdTS < 0x80000000) && (dPktTS < 0x80000000) {
-				diff := (float64(dRcvdTS)*float64(s.RTPSampleRate))/
-					float64(time.Second) - float64(dPktTS)
-				if diff < 0 {
-					diff = -diff
-				}
-				prevJitter16 := s.RTPJitter16
-				// compute jitter as uint64, and keep it in multiplied by 16
-				// form to reduce rounding errors
-				jitter16 := prevJitter16 + uint64(diff) - (prevJitter16+8)/16
-				s.RTPJitter16 = jitter16
-			}
+		s.computeSetJitter16(prevSeqNo, prevRcvdTS, prevPktTS)
+	}
+}
+
+func (s *PktStats) computeSetJitter16(prevSeqNo RTPseq, prevRcvdTS timestamp.TS, prevRTPhTS RTPts) (bool, uint64) {
+
+	// compute delay, jitter, but only if packet is newer than the last one
+	// (taking into account possible 16 bit wrap around)
+	if (s.RTPSampleRate > 0) && prevSeqNo.Less(RTPseq(s.RTPSeqNo)) {
+		if ok, jitter16 := s.computeJitter16(s.RTPrcvdTSn, prevRcvdTS, RTPts(s.RTPpktTSn), prevRTPhTS); ok {
+			s.RTPJitter16 = jitter16
+			return true, jitter16
 		}
 	}
+	return false, s.RTPJitter16
+}
+
+func (s *PktStats) computeJitter16(crtTS, prevTS timestamp.TS, crtRTPhTS, prevRTPhTS RTPts) (bool, uint64) {
+	dRcvdTS := crtTS - prevTS
+	dPktTS := crtRTPhTS - prevRTPhTS
+	// check if timestamps not too far away
+	// (taking into account possible 16 bit wrap around)
+	if (dRcvdTS < 0x80000000) && (dPktTS < 0x80000000) {
+		diff := (float64(dRcvdTS)*float64(s.RTPSampleRate))/
+			float64(time.Second) - float64(dPktTS)
+		if diff < 0 {
+			diff = -diff
+		}
+		prevJitter16 := s.RTPJitter16
+		// compute jitter as uint64, and keep it in multiplied by 16
+		// form to reduce rounding errors
+		jitter16 := prevJitter16 + uint64(diff) - (prevJitter16+8)/16
+		return true, jitter16
+	}
+	return false, s.RTPJitter16
 }
 
 // Jitter returns the running jitter in clk rate units and ms
