@@ -176,7 +176,7 @@ func (rd *RTPStreamData) String() string {
 // total stats and the previous stats snapshot. Must be called with RTP hash
 // lock held (for seqlock writer protection).
 func (rd *RTPStreamData) updatePStats(prevStats *PktStats,
-	rcvdTS timestamp.TS, pktTS uint32) {
+	rcvdTS timestamp.TS, pktTS RTPts) {
 	rd.PStatsBeginWrite()
 
 	// Counter deltas

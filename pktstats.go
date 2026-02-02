@@ -20,10 +20,10 @@ type PktStats struct {
 	RTPSampleRate uint32
 	RTPrcvdTS0    timestamp.TS // receive timestamp for 1st RTP packet
 	RTPrcvdTSn    timestamp.TS // receive timestamp for the last RTP packet
-	RTPpktTS0     uint32       // timestamp in first RTP packet
-	RTPpktTSn     uint32       // timestamp in last RTP packet seen
-	RTPSeqNo      uint32       // rtp seq number for the last packet
-	RTPSeqNo0     uint32       // rtp seq number for the 1st packet
+	RTPpktTS0     RTPts        // timestamp in first RTP packet
+	RTPpktTSn     RTPts        // timestamp in last RTP packet seen
+	RTPSeqNo      RTPseq       // rtp seq number for the last packet
+	RTPSeqNo0     RTPseq       // rtp seq number for the 1st packet
 	RTPJitter16   uint64       // holds jitter * 16 as uint64
 
 	Rate struct {
@@ -264,7 +264,7 @@ func (s *PktStats) AddRTPpkt(pkt []byte, ts timestamp.TS,
 	s.RTPrcvdTSn = ts
 	prevPktTS := RTPts(s.RTPpktTSn)
 	prevSeqNo := RTPseq(s.RTPSeqNo)
-	s.RTPSeqNo = uint32(rtph.SeqNo)
+	s.RTPSeqNo = rtph.SeqNo
 
 	if crtPkts == 1 || prevSeqNo.Less(rtph.SeqNo) {
 		// current packet is newer than the last one or the 1st one
@@ -277,7 +277,7 @@ func (s *PktStats) AddRTPpkt(pkt []byte, ts timestamp.TS,
 		}
 	}
 
-	s.RTPpktTSn = uint32(rtph.TS)
+	s.RTPpktTSn = rtph.TS
 	if dj != nil {
 		dj.Add(rtph.SeqNo, rtph.TS, &s.DjStats)
 	}
@@ -286,10 +286,10 @@ func (s *PktStats) AddRTPpkt(pkt []byte, ts timestamp.TS,
 			s.RTPrcvdTS0 = ts
 		}
 		if s.RTPpktTS0 == 0 {
-			s.RTPpktTS0 = uint32(rtph.TS)
+			s.RTPpktTS0 = rtph.TS
 		}
 		if s.RTPSeqNo0 == 0 {
-			s.RTPSeqNo0 = uint32(rtph.SeqNo)
+			s.RTPSeqNo0 = rtph.SeqNo
 		}
 		s.RTPSampleRate = FindSampleRate(rtph.PayloadType, mediaType,
 			payloadTypes, clkRates)
