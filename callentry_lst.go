@@ -54,8 +54,8 @@ func (h *CallEntryHash) Init(sz int) {
 			"new call tracking entry creation alloc failure"},
 		{&h.cnts.hFailLimEx, 0, nil, nil, "fail_lim",
 			"new call entry creation attempt exceeded entries limit"},
-		{&h.cnts.hActive, counters.CntMaxF, nil, nil, "active",
-			"current total tracked entries"},
+		{&h.cnts.hActive, counters.CntNonMonoF | counters.CntMaxF, nil, nil,
+		 "active", "current total tracked entries"},
 	}
 	entries := 50 // extra space to allow registering more counters
 	if entries < len(callsCntDefs) {
@@ -78,7 +78,7 @@ func (h *CallEntryHash) Init(sz int) {
 			continue
 		}
 		def := counters.Def{
-			&h.cnts.hState[i], counters.CntMaxF, nil, nil,
+			&h.cnts.hState[i], counters.CntNonMonoF | counters.CntMaxF, nil, nil,
 			CallState(i).Name(),
 			CallState(i).Desc(),
 		}
