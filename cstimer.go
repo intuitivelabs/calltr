@@ -67,11 +67,13 @@ func csTimerInitUnsafe(cs *CallEntry, after time.Duration) {
 // It must be of the wtimer.TimerHandleF type, since it is registered
 // as a callback for a wtimer timer.
 // The parameters are:
-//  wt - timer wheel pointer (needed for all the operations on timers)
-//  h -  timer handler (pointer to the TimerLnk structure used for the
-//        timer)
-//  ce   - opaque callback parameters, in our case it will always be
-//         the CallEntry that own the timer.
+//
+//	wt - timer wheel pointer (needed for all the operations on timers)
+//	h -  timer handler (pointer to the TimerLnk structure used for the
+//	      timer)
+//	ce   - opaque callback parameters, in our case it will always be
+//	       the CallEntry that own the timer.
+//
 // It returns true and new interval to extend the timer or false to stop
 // it immediately (e.g. after freeing it inside the callback)
 func csTimer(wt *wtimer.WTimer, h *wtimer.TimerLnk,
@@ -137,8 +139,8 @@ func csTimer(wt *wtimer.WTimer, h *wtimer.TimerLnk,
 					cEvHandler(ev, cs, src, dst)
 				}
 			}
-			cs.Unref()
-			return false, 0 // end timer
+			cs.UnrefCleanUnsafe(true) // clean and unref
+			return false, 0           // end timer
 		} // else fall-through
 	}
 	/* else if timeout extended */

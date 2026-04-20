@@ -34,10 +34,11 @@ const (
 	MaxUASpace          = 64  // max sace for saving UA (from UAC or UAS)
 	DefaultUACSpace     = 64
 	DefaultUASSpace     = 48
-	MaxPAI1Space        = 160 // max space for saving 1st P-Asserted-Identity
-	DefaultPAI1Space    = 64  // if 1st PAI not known yet
-	MaxPAI2Space        = 96  // max space for saving 2nd P-Asserted-Identity
-	DefaultPAI2Space    = 32  // if 2nd PAI not known yet
+	MaxPAI1Space        = 160     // max space for saving 1st P-Asserted-Identity
+	DefaultPAI1Space    = 64      // if 1st PAI not known yet
+	MaxPAI2Space        = 96      // max space for saving 2nd P-Asserted-Identity
+	DefaultPAI2Space    = 32      // if 2nd PAI not known yet
+	MaxSDPSpace         = 2 * 512 // ? 2*1k TODO: keep only necessary
 	HashSize            = 65536
 )
 
@@ -764,10 +765,11 @@ func addSlice(src []byte, dstP *sipsp.PField, dbuf *[]byte, offs *int, max int) 
 // record message type and direction
 // TODO: move it in a separate file and conditional compile
 // format: last bit (15) -> direction, 0 caller -callee or 1 (reverse)
-//              bit 14   -> type: 0 request, 1 reply
-//              bit 13-10 -> retransmission no. 0 == no retr, max 16)
-//              bits 0-9 -> reply status , if type == 1
-//              bit 0-8  -> request method no. if type == 0
+//
+//	bit 14   -> type: 0 request, 1 reply
+//	bit 13-10 -> retransmission no. 0 == no retr, max 16)
+//	bits 0-9 -> reply status , if type == 1
+//	bit 0-8  -> request method no. if type == 0
 type MsgRec uint16
 
 const (
@@ -833,12 +835,13 @@ type MsgBackTrace struct {
 	N    uint // number of message
 }
 
-//AddReq adds a request to the message trace.
+// AddReq adds a request to the message trace.
 // The parameteres are:
-//    method - the sip request method
-//    dir    - the request direction (UAC -> UAS or UAS -> UAC)
-//    isRetr - true if it's a retransmission of some previous request
-//    msgCnt - number of identical messages to add (at least 1)
+//
+//	method - the sip request method
+//	dir    - the request direction (UAC -> UAS or UAS -> UAC)
+//	isRetr - true if it's a retransmission of some previous request
+//	msgCnt - number of identical messages to add (at least 1)
 func (m *MsgBackTrace) AddReq(method sipsp.SIPMethod, dir int,
 	isRetr bool, msgCnt int) {
 	if msgCnt < 1 {
@@ -866,12 +869,13 @@ func (m *MsgBackTrace) AddReq(method sipsp.SIPMethod, dir int,
 	m.N++
 }
 
-//AddRepl adds a reply to the message trace.
+// AddRepl adds a reply to the message trace.
 // The parameteres are:
-//    status - the sip reply status code
-//    dir    - the request direction (UAC -> UAS or UAS -> UAC)
-//    isRetr - true if it's a retransmission of some previous reply
-//    msgCnt - number of identical messages to add (at least 1)
+//
+//	status - the sip reply status code
+//	dir    - the request direction (UAC -> UAS or UAS -> UAC)
+//	isRetr - true if it's a retransmission of some previous reply
+//	msgCnt - number of identical messages to add (at least 1)
 func (m *MsgBackTrace) AddRepl(status uint16, dir int,
 	isRetr bool, msgCnt int) {
 	if msgCnt < 1 {
@@ -931,6 +935,15 @@ func (s *StateBackTrace) Add(cs CallState) {
 	s.N++
 }
 
+// Last return the most recent state saved and true
+// or CallStNone and false if no previous state is recorded
+func (s *StateBackTrace) Last() (CallState, bool) {
+	if s.N > 0 {
+		return s.PrevState[int(s.N-1)%len(s.PrevState)], true
+	}
+	return CallStNone, false
+}
+
 func (s *StateBackTrace) String() string {
 	var i uint
 	var str string
@@ -951,8 +964,9 @@ func (s *StateBackTrace) String() string {
 
 // CallEntry holds dialog or call state information in a compact form.
 // WARNING: since a custom mem. allocator will be used in the future, do
-//          not use pointers to go allocated objects (or GC might delete
-//          them)
+//
+//	not use pointers to go allocated objects (or GC might delete
+//	them)
 type CallEntry struct {
 	next, prev *CallEntry
 	Key        CallKey
@@ -961,16 +975,20 @@ type CallEntry struct {
 	ReqsNo     [2]uint
 	ReplsNo    [2]uint
 	ReplStatus [2]uint16
-	hashNo     uint32 // cache hash value
-	Flags      CallFlags
-	EvFlags    EventFlags      // sent/generated events
-	Method     sipsp.SIPMethod // creating method
-	State      CallState
-	ReqSig     sipsp.MsgSig // creating request msg sig
-	evHandler  HandleEvF    // event handler function
+	hashNo     uint32          // cache hash value
+	EvFlags    EventFlags      // sent/generated events (u32)
+	Flags      CallFlags       // call flags (u16)
+	Method     sipsp.SIPMethod // creating method  (u8)
+	State      CallState       // (u8)
+	ReqSig     sipsp.MsgSig    // creating request msg sig
+	evHandler  HandleEvF       // event handler function
 
 	// used only for REGISTERS:
 	regBinding *RegEntry // pointer to cached registry binding
+	// used to keep the current parsed SDP
+	sdp [2]*SDPsessInfo
+	// used to kepp track of associated RTP sessions
+	rtpSession *RTPSession
 
 	FinReplTS      timestamp.TS // final call establisment reply (>= 200)
 	EarlyDlgTS     timestamp.TS // early dialog (18x)
@@ -1020,11 +1038,22 @@ func (c *CallEntry) Ref() int32 {
 // Unref decrements the reference counter and if 0 frees the CallEntry.
 // Returns true if the CallEntry was freed and false if it's still referenced
 func (c *CallEntry) Unref() bool {
-	if atomic.AddInt32(&c.refCnt, -1) == 0 {
+	return c.UnrefN(1)
+}
+
+// UnrefN decrements the reference counter by n and if 0 frees the CallEntry.
+// Returns true if the CallEntry was freed and false if it's still referenced
+func (c *CallEntry) UnrefN(n uint32) bool {
+	v := atomic.AddInt32(&c.refCnt, -int32(n))
+	if v < 0 {
+		BUG("CallEntry.UnrefN(%d): %d refCnt less then 0\n",
+			n, v)
+	}
+	if v <= 0 { // try to go on even if refCnt negative
 		// sanity regBinding check
 		if c.regBinding != nil {
 			// NOTE: if refCnt is 0 then c.regBinding should be always nil
-			// otherwise c should be still ref'ed from the reg cache entry
+			// otherwise c would be still ref'ed from the reg cache entry
 			// and the refCnt would not be 0
 			BUG("CallEntry.Unref(): 0 refCnt but still linked "+
 				"from regBinding cache: %p <- %p [%v]\n",
@@ -1038,10 +1067,89 @@ func (c *CallEntry) Unref() bool {
 			}
 			c.regBinding.Unref()
 		}
+		if c.rtpSession != nil {
+			// NOTE: if refCnt is 0 then c.rtpSession must always be nil
+			// otherwise c would be still ref'ed from the rtp session
+			// entry and its rtp streams and refCnt would not be 0
+			BUG("CallEntry.Unref(): 0 refCnt but still linked "+
+				"from rtpSession: %p <- %p [%s]\n",
+				c, c.rtpSession, c.rtpSession.String())
+			// Failsafe: even in the "buggy" case attempt to "recover"
+			if c.rtpSession.ce == c {
+				// clear rtp session, but do not unref e (refcnt is already 0)
+				callEntryClearRTPSess(c, false)
+			}
+			c.rtpSession = nil
+		}
+		if c.sdp[0] != nil {
+			FreeSDPsessInfo(c.sdp[0])
+			c.sdp[0] = nil
+		}
+		if c.sdp[1] != nil {
+			FreeSDPsessInfo(c.sdp[1])
+			c.sdp[1] = nil
+		}
 		FreeCallEntry(c)
 		return true
 	}
 	return false
+}
+
+// UnrefCleanUnsafe will free/clean all the extras linked to a
+// CallEntry that is _not_ in the hash.
+// WARNING: make sure first that the CallEntry is not in the hash
+// (e.g. call unlinkCallEntryUnsafe() first).
+// The current version frees the reg cache linked entry and the
+// rtp sessions (unlinkCallEntry() above will remove the CallEntry,
+// and associated reg entry and rtp sessions from all the global
+// accessible hashes, but it will not free / unref the entries or
+// the parent CallEntry).
+// If unref is false it will still keep a ref. to
+// the CallEntry.
+func (c *CallEntry) UnrefCleanUnsafe(unref bool) {
+	re := c.regBinding
+	rtpSession := c.rtpSession
+	rmRefs := uint32(0)
+	if re != nil {
+		// TODO: use a canary value for removed entries in re.hashNo
+		// h := re.hashNo
+		if re.ce == c {
+			re.ce = nil
+			rmRefs++ // we removed 1 ref
+		} else {
+			// else somebody changed/removed the link => bail out
+			BUG("regBinding CallEntry link wrong: expected %p, got %p\n",
+				c, re.ce)
+		}
+		c.regBinding = nil
+		re.Unref()
+	}
+	if rtpSession != nil {
+		rtpSession.destroyStreamsUnsafe()
+		// TODO: check for rtpSession.ceHashNo. "removed" magic value
+		// if rtpSession.ceHashNo.Load() != (^uint32(0)) ...
+		if rtpSession.ce == c {
+			rtpSession.ce = nil
+			rmRefs++ // we removed 1 ref
+		} else {
+			// else somebody changed/removed the link => bail out
+			BUG("rtpSession CallEntry link changed: %p, but expected %p\n",
+				rtpSession.ce, c)
+		}
+		c.rtpSession = nil
+		rtpSession.Unref()
+	}
+	if unref {
+		c.UnrefN(rmRefs + 1)
+	} else {
+		c.UnrefN(rmRefs)
+	}
+}
+
+// lastState returns the last state and true if there is a last state
+// or CallStNone and false.
+func (c *CallEntry) lastState() (CallState, bool) {
+	return c.prevState.Last()
 }
 
 // match returns the "matching type" between the current call entry and
