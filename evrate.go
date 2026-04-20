@@ -31,7 +31,7 @@ type EvRateMax struct {
 type EvRateMaxes [NEvRates]EvRateMax
 
 // InitRateMaxes initialises an EvRateMaxes array based on an array of
-//  max values and an array of time intervals on which the rate values should
+// max values and an array of time intervals on which the rate values should
 // be calculated.
 func InitEvRateMaxes(em *EvRateMaxes,
 	maxes *[NEvRates]float64, intvls *[NEvRates]time.Duration) {
@@ -184,7 +184,7 @@ func (r *EvRate) ComputeRate(v uint64, crtT timestamp.TS,
 // was updated and false and the previous rate if not enough time has passed
 // since the last update. If the previous rate is less then the
 // "instant" rate, the "instant" rate will be returned (evs since last
-//  rate update).
+// rate update).
 func (r *EvRate) Update(v uint64, crtT,
 	t0 timestamp.TS, delta time.Duration) (bool, float64) {
 	if r.Updated.IsZero() {
@@ -221,8 +221,8 @@ type EvExcInfo struct {
 }
 
 // FillEvRateInfo fills a EvRateInfo structure from an EvExcInfo,
-//  current rate, max rate, the rate interval and a custom diff exceeded
-//  count diff since last report.
+// current rate, max rate, the rate interval and a custom diff exceeded
+// count diff since last report.
 func FillEvRateInfo(ri *EvRateInfo, exInfo EvExcInfo,
 	rate, maxr float64, intvl time.Duration, diff uint64) {
 	if exInfo.Exceeded {
@@ -301,9 +301,9 @@ func (er *EvRateEntry) Unref() bool {
 // are updated with evCntUpd. evCntUpd should be 0 if UpdateRates was not
 // called due to a new event (e.g. called on timer or during GC).
 // The rate exceeded state is recorded in a EcExcInfo structure that will
-//  be returned.
+// be returned.
 // The return values are:  the index of the exceeded rate (or the first non-0
-//  rate if nothing was exceeded), the current computed value for the rate
+// rate if nothing was exceeded), the current computed value for the rate
 // that was exceeded (or the first non zero rate) and the exceeded state
 // (in a EvExcInfo structure).
 func (er *EvRateEntry) UpdateRates(crtT timestamp.TS, maxRates *EvRateMaxes,
@@ -398,12 +398,13 @@ func (er *EvRateEntry) IncUpdateR(crtT timestamp.TS, maxRates *EvRateMaxes) (int
 }
 
 // GetRate returns the rate at rIdx.
-// The parameters are: rIdx, the index of the requested rate
-//                     crtT  the current time
-//                     maxRates an array with  max rate/interval pairs of which
-//                              only the interval part is used to compute the
-//                              current rate. Can be nil (in this case the
-//                              current interval saved inside er will be used).
+// The parameters are:
+//	rIdx  the index of the requested rate
+//	crtT  the current time
+//	maxRates an array with  max rate/interval pairs of which
+//	         only the interval part is used to compute the
+//	         current rate. Can be nil (in this case the
+//	         current interval saved inside er will be used).
 // It returns true and value on success, false on error.
 func (er *EvRateEntry) GetRate(rIdx int, crtT timestamp.TS,
 	maxRates *EvRateMaxes) (bool, float64) {
@@ -444,17 +445,17 @@ func (er *EvRateEntry) Copy(src *EvRateEntry) {
 
 // matchEvRateEntry returns true if the entry matches.
 // Params:
-//		val - 1 to check for exceeded, 0 for not exceeded, -1 to match all
-//		rateIdx - rate index to compare (from EvRateInts[])
-//		rateVal - rate value as interger. The comparison direction is
-//		          given by the sign (+ get rates >= rateVal, - get rates
-//		           < -rateVal)
-//		 net    - check against IPNet, ignored if nil
-//		 re     - check IP agains regex, ignored if nil
-//		 crtT   - current time for computing/getting rates
-//		 maxRates - rate/interval array [NEvRates], of which only the
-//		            interval part is used to compute the current rate.
-//		            Can be nil (the last/current interval will be used).
+//	val - 1 to check for exceeded, 0 for not exceeded, -1 to match all
+//	rateIdx - rate index to compare (from EvRateInts[])
+//	rateVal - rate value as interger. The comparison direction is
+//	          given by the sign (+ get rates >= rateVal, - get rates
+//	           < -rateVal)
+//	 net    - check against IPNet, ignored if nil
+//	 re     - check IP agains regex, ignored if nil
+//	 crtT   - current time for computing/getting rates
+//	 maxRates - rate/interval array [NEvRates], of which only the
+//	            interval part is used to compute the current rate.
+//	            Can be nil (the last/current interval will be used).
 func (er *EvRateEntry) matchEvRateEntry(val int, rateIdx, rateVal int,
 	net *net.IPNet, re *regexp.Regexp, crtT timestamp.TS,
 	maxRates *EvRateMaxes) bool {

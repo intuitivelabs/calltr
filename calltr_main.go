@@ -42,6 +42,7 @@ type Config struct {
 	RTP               bool   // keep track of RTP sessions
 	Mem               MemConfig
 	Dbg               DbgFlags
+	StatsInterval     uint32 // statistic interval in s, 0 = disabled
 	// per state timeout in s, used at runtime
 	stateTimeoutS [len(defaultStateTimeoutS)]uint32
 }
@@ -237,7 +238,9 @@ func newCallEntry(hashNo, cseq uint32, m *sipsp.PSIPMsg,
 	e.Info.AddFromMsg(m, dir, 0)
 	e.State = CallStNone
 	chgState(e, CallStInit, dir)
-	csTimerInitUnsafe(e, time.Duration(e.State.TimeoutS())*time.Second)
+	// init timeouts values: expire = state specific timeout and
+	// statistics interval is 0 (disabled for new entries)
+	csTimerInitUnsafe(e, time.Duration(e.State.TimeoutS())*time.Second, 0)
 	e.hashNo = hashNo
 	e.CSeq[dir] = cseq
 	e.Method = m.Method()
@@ -662,11 +665,12 @@ func addCallEntryUnsafe(e *CallEntry, m *sipsp.PSIPMsg,
 		cstHash.cnts.grp.Inc(cstHash.cnts.hFailLimEx)
 		return false, EvNone, EvSDPNone
 	}
-	_, to, _, ev, sdpEv := updateState(e, m, dir)
+	_, to, statsInt, _, ev, sdpEv := updateState(e, m, dir)
 	e.Ref() // for the hash
 	cstHash.HTable[e.hashNo].Insert(e)
 	cstHash.HTable[e.hashNo].IncStats()
-	csTimerInitUnsafe(e, time.Duration(to)*time.Second)
+	csTimerInitUnsafe(e, time.Duration(to)*time.Second,
+		time.Duration(statsInt)*time.Second)
 	if !csTimerStartUnsafe(e) {
 		cstHash.HTable[e.hashNo].Rm(e)
 		cstHash.HTable[e.hashNo].DecStats()
@@ -901,7 +905,7 @@ func TrackedMsg(m *sipsp.PSIPMsg, n [2]NetInfo) (bool, CallMatchType) {
 func ProcessMsg(m *sipsp.PSIPMsg, ni [2]NetInfo, f HandleEvF, evd *EventData,
 	sdpEvd *EventData, flags CallStProcessFlags) (*CallEntry, CallMatchType,
 	int, EventType, EventType) {
-	var to TimeoutS
+	var to, statsInt TimeoutS
 	var toF TimerUpdateF
 	ev := EvNone
 	sdpEv := EvSDPNone
@@ -994,9 +998,9 @@ func ProcessMsg(m *sipsp.PSIPMsg, ni [2]NetInfo, f HandleEvF, evd *EventData,
 				// them in forked or re-used REGISTER entries (which are
 				// caused by REGISTERs with different from or to-tag)
 				e.EvFlags &= ^EvRegMaskF
-				_, to, toF, ev, sdpEv = updateState(e, m, dir)
-				csTimerUpdateTimeoutUnsafe(e,
-					time.Duration(to)*time.Second, toF)
+				_, to, statsInt, toF, ev, sdpEv = updateState(e, m, dir)
+				csTimerUpdateTimeoutsUnsafe(e,
+					time.Duration(to)*time.Second, time.Duration(statsInt)*time.Second, toF)
 			default:
 
 				e = n
@@ -1019,9 +1023,9 @@ func ProcessMsg(m *sipsp.PSIPMsg, ni [2]NetInfo, f HandleEvF, evd *EventData,
 	case CallFullMatch:
 		e.Ref()
 		if flags&CallStProcessUpdate != 0 {
-			_, to, toF, ev, sdpEv = updateState(e, m, dir)
-			csTimerUpdateTimeoutUnsafe(e,
-				time.Duration(to)*time.Second, toF)
+			_, to, statsInt, toF, ev, sdpEv = updateState(e, m, dir)
+			csTimerUpdateTimeoutsUnsafe(e,
+				time.Duration(to)*time.Second, time.Duration(statsInt)*time.Second, toF)
 		}
 	default:
 		Log.PANIC("calltr.ProcessMsg: unexpected match type %d\n", match)
@@ -1097,7 +1101,7 @@ errorLocked:
 	return nil, CallErrMatch, 0, EvNone, EvSDPNone
 }
 
-// Track will start calll-tracking the passed message.
+// Track will start call-tracking the passed message.
 // It returns true on success and whether or not the message matched an existing call:
 //
 //	CallNoMatch (new call-entry was created),
@@ -1292,9 +1296,9 @@ func updateRegCache(event EventType, e *CallEntry, aor []byte, c []byte) (bool, 
 					ce.Flags |= CFRegBStolen
 					if !cstHash.HTable[ce.hashNo].Detached(ce) {
 						//  force short delete timeout
-						csTimerUpdateTimeoutUnsafe(ce,
-							time.Duration(ce.State.TimeoutS())*time.Second,
-							FTimerUpdForce)
+						csTimerUpdateTimeoutsUnsafe(ce,
+							time.Duration(ce.State.TimeoutS())*time.Second, 0,
+							FTimerUpdForce|FTimerStatsStopT)
 						//  update ev. flags (fake RegDel)
 						ce.EvFlags.Set(EvRegDel)
 						ce.lastEv = EvRegDel
@@ -1415,9 +1419,9 @@ func regDelNow(e *CallEntry,
 				if !cstHash.HTable[ce.hashNo].Detached(ce) {
 					deleted++
 					//  force short delete timeout
-					csTimerUpdateTimeoutUnsafe(ce,
-						time.Duration(ce.State.TimeoutS())*time.Second,
-						FTimerUpdForce)
+					csTimerUpdateTimeoutsUnsafe(ce,
+						time.Duration(ce.State.TimeoutS())*time.Second, 0,
+						FTimerUpdForce|FTimerStatsStopT)
 					//  update ev. flags
 					if matchAll && !ce.EvFlags.Test(EvRegDel) {
 						// if delete all contacts (*) mark other bindings
@@ -1573,9 +1577,9 @@ retry:
 				}
 				if !cstHash.HTable[ce.hashNo].Detached(ce) {
 					//  force delayed delete timeout
-					csTimerUpdateTimeoutUnsafe(ce,
-						time.Duration(delDelay)*time.Second,
-						FTimerUpdForce)
+					csTimerUpdateTimeoutsUnsafe(ce,
+						time.Duration(delDelay)*time.Second, 0,
+						FTimerUpdForce|FTimerStatsStopT)
 					deleted++
 				} // else already detached on waiting for 0 refcnt =>
 				// do nothing

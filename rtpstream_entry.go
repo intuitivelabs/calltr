@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net"
 	"regexp"
+	"runtime"
 	"sync/atomic"
 
 	"github.com/intuitivelabs/timestamp"
@@ -39,10 +40,14 @@ const (
 // RTPStreamData holds one stream
 // (caller or callee)
 type RTPStreamData struct {
-	Dst        NetInfo // destination (e.g. from SDP)
-	Src        NetInfo // expected source (assuming symmetric RTP)
-	Src2       NetInfo // discovered source
-	Stats      PktStats
+	Dst        NetInfo        // destination (e.g. from SDP)
+	Src        NetInfo        // expected source (assuming symmetric RTP)
+	Src2       NetInfo        // discovered source
+	StatsSeq   atomic.Uint32  // seqlock for stats: odd = write in progress
+	PStatsSeq  atomic.Uint32  // seqlock for pstats: odd = write in progress
+	stats      PktStats       // total stats (from beginning of call)
+	pstats     PktStats       // periodic stats (since last report)
+	RTPdj      djBuf          // de-jitter buffer (used via stats)
 	Flags      RTPStreamFlags // TODO: atomic type (dbg read & set race)
 	Type       MediaType
 	Proto      MediaProto
@@ -51,15 +56,178 @@ type RTPStreamData struct {
 	ClkRates   [SDPmaxFormats]uint  // corresponding sample rate
 }
 
+// TotalStats returns a pointer to the total (cumulative) stats.
+func (rd *RTPStreamData) TotalStats() *PktStats {
+	return &rd.stats
+}
+
+// PeriodicStats returns a pointer to the periodic stats.
+func (rd *RTPStreamData) PeriodicStats() *PktStats {
+	return &rd.pstats
+}
+
+// StatsBeginWrite starts a write to Stats (seqlock writer side).
+// Must be called with the RTP hash lock held, since it does not
+// protect from multiple writers (all the write operations must
+// be done with the lock held)
+func (rd *RTPStreamData) StatsBeginWrite() {
+	rd.StatsSeq.Add(1) // odd = write in progress
+}
+
+// StatsEndWrite completes a write to Stats (seqlock writer side).
+// Must be called with the RTP hash lock held, since it does not
+// protect from multiple writers.
+func (rd *RTPStreamData) StatsEndWrite() {
+	rd.StatsSeq.Add(1) // even = write complete
+}
+
+// StatsRead reads Stats using seqlock (lock-free, may retry).
+// Returns a consistent snapshot of the stats.
+func (rd *RTPStreamData) StatsRead() PktStats {
+	retries := 0
+	for {
+		seq1 := rd.StatsSeq.Load()
+		if seq1&1 != 0 {
+			// write in progress, spin
+			retries++
+			if retries > 5 {
+				runtime.Gosched()
+			}
+			continue
+		}
+		// Copy stats (plain struct copy, no atomics needed)
+		stats := rd.stats
+		seq2 := rd.StatsSeq.Load()
+		if seq1 == seq2 {
+			return stats
+		}
+		// sequence changed during read, retry
+		retries++
+		if retries > 5 {
+			runtime.Gosched()
+		}
+	}
+}
+
+// PStatsBeginWrite starts a write to PStats (seqlock writer side).
+func (rd *RTPStreamData) PStatsBeginWrite() {
+	rd.PStatsSeq.Add(1) // odd = write in progress
+}
+
+// PStatsEndWrite completes a write to PStats (seqlock writer side).
+func (rd *RTPStreamData) PStatsEndWrite() {
+	rd.PStatsSeq.Add(1) // even = write complete
+}
+
+// PStatsRead reads PStats using seqlock (lock-free, may retry).
+// Returns a consistent snapshot of the periodic stats.
+func (rd *RTPStreamData) PStatsRead() PktStats {
+	retries := 0
+	for {
+		seq1 := rd.PStatsSeq.Load()
+		if seq1&1 != 0 {
+			// write in progress, spin
+			retries++
+			if retries > 5 {
+				runtime.Gosched()
+			}
+			continue
+		}
+		stats := rd.pstats
+		seq2 := rd.PStatsSeq.Load()
+		if seq1 == seq2 {
+			return stats
+		}
+		retries++
+		if retries > 5 {
+			runtime.Gosched()
+		}
+	}
+}
+
+// PStatsSwapAndZero retrieves periodic stats and resets them to zero.
+// Must be called with RTP hash lock held.
+// The result is written to 'out' to avoid allocation.
+// The Rate field is preserved (not zeroed) to maintain rate calculation.
+func (rd *RTPStreamData) PStatsSwapAndZero(out *PktStats) {
+	rd.PStatsBeginWrite()
+	*out = rd.pstats
+	rate := rd.pstats.Rate // preserve Rate
+	rd.pstats = PktStats{}
+	rd.pstats.Rate = rate
+	rd.PStatsEndWrite()
+}
+
+// PStatsSet sets PStats from another PktStats value.
+// Must be called with RTP hash lock held.
+func (rd *RTPStreamData) PStatsSet(from *PktStats) {
+	rd.PStatsBeginWrite()
+	rd.pstats = *from
+	rd.PStatsEndWrite()
+}
+
 func (rd *RTPStreamData) String() string {
 	return fmt.Sprintf("%s:%d <- %s:%d (%x)",
 		rd.Dst.IP().String(), rd.Dst.Port,
 		rd.Src.IP().String(), rd.Src.Port, rd.Flags)
 }
 
+// updatePStats updates periodic stats based on the delta between current
+// total stats and the previous stats snapshot. Must be called with RTP hash
+// lock held (for seqlock writer protection).
+func (rd *RTPStreamData) updatePStats(prevStats *PktStats,
+	rcvdTS timestamp.TS, pktTS RTPts) {
+	rd.PStatsBeginWrite()
+
+	// Counter deltas
+	rd.pstats.Pkts += rd.stats.Pkts - prevStats.Pkts
+	rd.pstats.Bytes += rd.stats.Bytes - prevStats.Bytes
+	rd.pstats.RTPpkts += rd.stats.RTPpkts - prevStats.RTPpkts
+	rd.pstats.RTPbytes += rd.stats.RTPbytes - prevStats.RTPbytes
+	rd.pstats.RTPexpected += rd.stats.RTPexpected - prevStats.RTPexpected
+	rd.pstats.RTPssrcChanges += rd.stats.RTPssrcChanges - prevStats.RTPssrcChanges
+
+	// Timestamps
+	if rd.pstats.RTPrcvdTS0.IsZero() {
+		/* if rtp receive timestamp was reset => a new periodic stats interval has
+		   started -> first RTP packet timestamp in this new period must be updated
+		*/
+		rd.pstats.RTPrcvdTS0 = rcvdTS
+		rd.pstats.RTPpktTS0 = pktTS
+	}
+	rd.pstats.RTPrcvdTSn = rd.stats.RTPrcvdTSn
+
+	// Latest values (not deltas)
+	rd.pstats.RTPpktTSn = rd.stats.RTPpktTSn
+	rd.pstats.RTPSeqNo = rd.stats.RTPSeqNo
+	rd.pstats.RTPJitter16 = rd.stats.RTPJitter16
+	rd.pstats.RTPSampleRate = rd.stats.RTPSampleRate
+	rd.pstats.RTPPayloadType = rd.stats.RTPPayloadType
+	rd.pstats.RTPssrc = rd.stats.RTPssrc
+	rd.pstats.Rate = rd.stats.Rate
+
+	// De-jitter stats delta
+	rd.pstats.DjStats.TotalQueued += rd.stats.DjStats.TotalQueued - prevStats.DjStats.TotalQueued
+	rd.pstats.DjStats.DropOld += rd.stats.DjStats.DropOld - prevStats.DjStats.DropOld
+	rd.pstats.DjStats.Dups += rd.stats.DjStats.Dups - prevStats.DjStats.Dups
+	rd.pstats.DjStats.OutOfOrder += rd.stats.DjStats.OutOfOrder - prevStats.DjStats.OutOfOrder
+
+	rd.PStatsEndWrite()
+}
+
 func (rd *RTPStreamData) AddPkt(pkt []byte, ts timestamp.TS) {
-	rd.Stats.AddPkt(pkt, ts, rd.Type,
-		rd.Payloads[:rd.PayloadsNo], rd.ClkRates[:rd.PayloadsNo])
+	// Capture stats before update
+	prevStats := rd.stats
+
+	// Update cumulative stats (increments global rtpStats)
+	rd.StatsBeginWrite()
+	rd.stats.AddPkt(pkt, ts, rd.Type,
+		rd.Payloads[:rd.PayloadsNo], rd.ClkRates[:rd.PayloadsNo],
+		&rd.RTPdj)
+	rd.StatsEndWrite()
+
+	// Update periodic stats with the delta
+	rd.updatePStats(&prevStats, rd.stats.RTPrcvdTSn, rd.stats.RTPpktTSn)
 }
 
 // matchLong returns true if the stream data matches and the data rate.
@@ -80,10 +248,10 @@ func (rd *RTPStreamData) matchLong(rateVal int,
 		return false, 0
 	}
 	if !crtT.IsZero() {
-		delta := rd.Stats.Rate.Bytes.Delta
+		delta := rd.stats.Rate.Bytes.Delta
 		if delta != 0 {
-			v := uint64(rd.Stats.Bytes.Load()) // current value
-			_, crtRate = rd.Stats.Rate.Bytes.ComputeRate(v, crtT, delta)
+			v := uint64(rd.stats.Bytes) // current value
+			_, crtRate = rd.stats.Rate.Bytes.ComputeRate(v, crtT, delta)
 			if rateVal > 0 {
 				if !(crtRate >= float64(rateVal)) {
 					return false, 0
@@ -121,9 +289,12 @@ func (rsd *RTPStreamData) SetDstFromMediaDesc(md *MediaDesc,
 	if !setNetInfofromMediaDesc(&rsd.Dst, md, fbkC) {
 		ret = false
 		if fbkC != nil {
+			side := 0
+			if (rsd.Flags & RTPSCallerF) == RTPSCallerF {
+				side = 1
+			}
 			ERR("failed to set IP for stream %p side %d from %q fallback %q\n",
-				rsd, (rsd.Flags&RTPSCallerF) == RTPSCallerF,
-				md.C.String(), fbkC.String())
+				rsd, side, md.C.String(), fbkC.String())
 		} else {
 			ERR("failed to set IP for stream %p side %d from %s\n",
 				rsd, rsd.Flags&RTPSCalleeF,

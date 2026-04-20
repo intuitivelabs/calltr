@@ -111,6 +111,11 @@ const (
 	EvRTPstats2F EventFlags = (EventFlags)(1) << EvRTPstats2
 
 	EvRegMaskF EventFlags = EvRegNewF | EvRegDelF | EvRegExpiredF
+
+	// EvNoPeriodicStatsF disables periodic RTP stats generation for this call.
+	// Used when IPFIX fast events are enabled (stats are sent immediately).
+	// Uses bit 31 to avoid conflict with event type bits (0-20).
+	EvNoPeriodicStatsF EventFlags = 1 << 31
 )
 
 // returns previous value
@@ -153,6 +158,14 @@ func (f EventFlags) String() string {
 			}
 		}
 	}
+	// Check special flags that are not event types
+	if f&EvNoPeriodicStatsF != 0 {
+		if s != "" {
+			s += "|no-periodic-stats"
+		} else {
+			s = "no-periodic-stats"
+		}
+	}
 	return s
 }
 
@@ -166,7 +179,7 @@ type HandleEvF func(callev *EventData)
 // HandleNewCev is a function callback that is called every time a new
 // call based event appears.
 // The parameters are the event type, the CallEntry that
-// triggered the event, the souce and destination (IP, port, protocol).
+// triggered the event, the source and destination (IP, port, protocol).
 // Note that the CallEntry must be treated as read-only
 // and no reference to it should be kept after the callback returns.
 // If a reference must be kept then the callback should call e.Ref()
@@ -330,6 +343,8 @@ var fake2xxReason = []byte("internal: implied OK")
 
 // Fill EventData from a CallEntry.
 // Returns the number of PFields added. For a valid event, at least 1.
+// Side-effects: it will zero the e.rtpSession.streams[][].pstats field
+// after retrieving the current value (PStatsSwapAndZero()).
 func (d *EventData) Fill(ev EventType, e *CallEntry) int {
 	var forcedReason []byte
 	d.Type = ev
@@ -482,6 +497,8 @@ func (d *EventData) Fill(ev EventType, e *CallEntry) int {
 	}
 	// RTP
 	if e.rtpSession != nil {
+		periodic := (ev == EvRTPstats1 || ev == EvRTPstats2)
+
 		streamsNo := len(e.rtpSession.streams)
 		if streamsNo > len(d.RTP) {
 			streamsNo = len(d.RTP)
@@ -490,14 +507,22 @@ func (d *EventData) Fill(ev EventType, e *CallEntry) int {
 			s1 := &e.rtpSession.streams[i][0]
 			s2 := &e.rtpSession.streams[i][1]
 			rtpStreamsHash.LockRTPStreamEntry(s1)
-			{
-				d.RTP[i][0].fillUnsafe(&s1.Stream)
+			if periodic {
+				var lastPStats PktStats
+				s1.Stream.PStatsSwapAndZero(&lastPStats)
+				d.RTP[i][0].fillUnsafe(&s1.Stream, &lastPStats)
+			} else {
+				d.RTP[i][0].fillUnsafe(&s1.Stream, s1.Stream.TotalStats())
 			}
 			rtpStreamsHash.UnlockRTPStreamEntry(s1)
 
 			rtpStreamsHash.LockRTPStreamEntry(s2)
-			{
-				d.RTP[i][1].fillUnsafe(&s2.Stream)
+			if periodic {
+				var lastPStats PktStats
+				s2.Stream.PStatsSwapAndZero(&lastPStats)
+				d.RTP[i][1].fillUnsafe(&s2.Stream, &lastPStats)
+			} else {
+				d.RTP[i][1].fillUnsafe(&s2.Stream, s2.Stream.TotalStats())
 			}
 			rtpStreamsHash.UnlockRTPStreamEntry(s2)
 		}
@@ -627,9 +652,9 @@ func (d *EventData) FillFromRegEntry(ev EventType, e *RegEntry) int {
 		d.ReplStatus = 408
 		forcedReason = fakeTimeoutReason
 	case EvRegDel, EvRegNew:
-		// the event should be directly generated fron the Register reply
+		// the event should be directly generated from the Register reply
 		// and Fill-ed from the CallEntry, not from here
-		// (whe don't have all the information)
+		// (we don't have all the information)
 		// However if called, try to fake something
 		d.ReplStatus = 292
 		forcedReason = fake2xxReason
@@ -753,6 +778,12 @@ func (ed *EventData) String() string {
 // returns ev or EvNone (if event was a retr)
 // unsafe, MUST be called w/ _e_ lock held or if no parallel access is possible
 func updateEvent(ev EventType, e *CallEntry) EventType {
+	// special case: statistics -> allow multiple same type events
+	if ev == EvRTPstats1 || ev == EvRTPstats2 {
+		e.EvFlags.Set(ev)
+		// do not set e.crtEv or e.lastEv for stats
+		return ev
+	}
 	// new event only if entry was not already canceled and event not
 	// already generated
 	if ev != EvNone && (e.Flags&CFCanceled == 0) && !e.EvFlags.Set(ev) {

@@ -131,18 +131,16 @@ func (n *NetInfo) EqualIP(o NetInfo) bool {
 	return bytes.Equal(n.IPAddr[:4], o.IPAddr[:4])
 }
 
-
 // IsZeroIP returns true if the address contains only zeros.
-func (n* NetInfo) IsZeroIP() bool {
-	len := 4
+func (n *NetInfo) IsZeroIP() bool {
+	length := 4
 	if n.Flags&NAddrIPv6 != 0 {
-		len = 16
+		length = 16
 	}
-	for i:=0; i < len; i++ {
+	for i := 0; i < length; i++ {
 		if n.IPAddr[i] != 0 {
 			return false
 		}
 	}
 	return true
 }
-

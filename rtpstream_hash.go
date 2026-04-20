@@ -345,7 +345,7 @@ func (h *RTPStreamHash) GetBestMatchCallid(dst, src NetInfo,
 				origSz = len(cid)
 				UnlockCallEntry(ce)
 			} else {
-				WARN("failed to lock callentry %p (removed from hash?)\n")
+				WARN("failed to lock callentry %p (removed from hash?)\n", ce)
 				// return not found since the callentry is about to
 				// be destroyed
 				match = RTPNoMatch
@@ -390,7 +390,7 @@ func (h *RTPStreamHash) GetBestMatchStream(dst, src NetInfo) (RTPMatchT, *RTPStr
 				rs.Ref()
 			} else {
 				BUG("hashed stream %p (%s) with nil parent session\n",
-					res, res.String(), rs)
+					res, res.String())
 			}
 		}
 	}
@@ -453,8 +453,8 @@ func (h *RTPStreamHash) ProcessPkt(dst, src NetInfo,
 			origSz = len(cid)
 			UnlockCallEntry(ce)
 		} else {
-			WARN("failed to lock callentry %p" +
-				" (removed from hash?)\n")
+			WARN("failed to lock callentry %p"+
+				" (removed from hash?)\n", ce)
 		}
 		ce.Unref()
 	}
@@ -465,7 +465,7 @@ func (h *RTPStreamHash) ProcessPkt(dst, src NetInfo,
 // SetStatsAndRefCallEntry sets the statistics for the matching rtp stream
 // and allows retrieving the matching referenced CallEntry.
 // It's purpose is to support external updates for the rtp streams
-// (e.g. receving rtp qos records/info without seeing the rtp packets).
+// (e.g. receiving rtp qos records/info without seeing the rtp packets).
 // It looks for the best matching entry, sets the statistics to the provided
 // values, copies the matching callid (if a match is found and dstCallid
 // is not nil), the source and destination addresses and returns a
@@ -487,7 +487,7 @@ func (h *RTPStreamHash) SetStatsAndRefCallEntry(dst, src NetInfo,
 	outCE **CallEntry) (RTPMatchT, int, int) {
 	m, n, sz, _ :=
 		h.updateStatsAndRefCallEntry(dst, src, newStats, true,
-			dstCallid, ceSrc, ceDst, outCE)
+			dstCallid, ceSrc, ceDst, outCE, false)
 	return m, n, sz
 }
 
@@ -495,7 +495,7 @@ func (h *RTPStreamHash) SetStatsAndRefCallEntry(dst, src NetInfo,
 // matching rtp stream and allows retrieving the matching referenced
 // CallEntry.
 // It's purpose is to support external updates for the rtp streams
-// (e.g. receving rtp qos records/info without seeing the rtp packets).
+// (e.g. receiving rtp qos records/info without seeing the rtp packets).
 // It looks for the best matching entry, updates the statistics to the
 // provided values, copies the matching callid (if a match is found
 // and dstCallid is not nil), the source and destination addresses
@@ -516,9 +516,9 @@ func (h *RTPStreamHash) SetStatsAndRefCallEntry(dst, src NetInfo,
 // The caller should check if the callid did fit fully in the provided slice.
 func (h *RTPStreamHash) UpdateStatsAndRefCallEntry(dst, src NetInfo,
 	newStats *PktStats, dstCallid []byte, ceSrc, ceDst *NetInfo,
-	outCE **CallEntry) (RTPMatchT, int, int, bool) {
+	outCE **CallEntry, disablePeriodicStats bool) (RTPMatchT, int, int, bool) {
 	return h.updateStatsAndRefCallEntry(dst, src, newStats, false,
-		dstCallid, ceSrc, ceDst, outCE)
+		dstCallid, ceSrc, ceDst, outCE, disablePeriodicStats)
 }
 
 // updateStatsAndRefCallEntry sets or updates the statistics for the
@@ -529,13 +529,13 @@ func (h *RTPStreamHash) UpdateStatsAndRefCallEntry(dst, src NetInfo,
 // It is an internal function used by SetStatsAndRefCallEntry and
 // UpdateStatsAndRefCallEntry.
 // It's purpose is to support external updates for the rtp streams
-// (e.g. receving rtp qos records/info without seeing the rtp packets).
+// (e.g. receiving rtp qos records/info without seeing the rtp packets).
 // It looks for the best matching entry, sets the statistics to the provided
 // values, copies the matching callid (if a match is found and dstCallid
 // is not nil), and returns a referenced CallEntry (if a match is found
 // and outCE is not nil).
 // If "set" is true it will set the statistics and if false it will update
-// them if the time intervals are not overlaping.
+// them if the time intervals are not overlapping.
 //
 // WARNING: if outCE is not nil, the caller of this function gets
 // ownership of a CallEntry reference and it is its responsibility
@@ -552,7 +552,7 @@ func (h *RTPStreamHash) UpdateStatsAndRefCallEntry(dst, src NetInfo,
 func (h *RTPStreamHash) updateStatsAndRefCallEntry(dst, src NetInfo,
 	newStats *PktStats, set bool,
 	dstCallid []byte, ceSrc, ceDst *NetInfo,
-	outCE **CallEntry) (RTPMatchT, int, int, bool) {
+	outCE **CallEntry, disablePeriodicStats bool) (RTPMatchT, int, int, bool) {
 	var match RTPMatchT
 	var copied, origSz int
 	var ret bool
@@ -581,28 +581,44 @@ func (h *RTPStreamHash) updateStatsAndRefCallEntry(dst, src NetInfo,
 					// (since it would require locking ce)
 				}
 			}
+			// Capture stats before update (for pstats delta)
+			prevStats := *rtpEntry.Stream.TotalStats()
+
+			// Update total stats with seqlock protection
+			rtpEntry.Stream.StatsBeginWrite()
 			if set {
-				rtpEntry.Stream.Stats.Set(newStats, false)
+				rtpEntry.Stream.TotalStats().Set(newStats, false)
 				ret = true
 			} else {
-				ret = rtpEntry.Stream.Stats.Update(newStats)
+				ret = rtpEntry.Stream.TotalStats().Update(newStats)
 			}
 			if newStats.RTPSampleRate == 0 {
 				// fix sample rate (depends on the negotiated
 				// codecs and clk rates)
 				payloadsNo := rtpEntry.Stream.PayloadsNo
-				rtpEntry.Stream.Stats.RTPSampleRate =
+				rtpEntry.Stream.TotalStats().RTPSampleRate =
 					FindSampleRate(newStats.RTPPayloadType,
 						rtpEntry.Stream.Type,
 						rtpEntry.Stream.Payloads[:payloadsNo],
 						rtpEntry.Stream.ClkRates[:payloadsNo])
 			}
+			rtpEntry.Stream.StatsEndWrite()
+
+			// Update periodic stats with deltas (if total stats updated)
+			if ret {
+				rtpEntry.Stream.updatePStats(&prevStats,
+					newStats.RTPrcvdTS0, newStats.RTPpktTS0)
+			}
 		} // else rtpEntry == nil => no entry found for the packet
 	}
 	h.HTable[hash].Unlock()
 	if ce != nil {
-		if len(dstCallid) != 0 || ceSrc != nil || ceDst != nil {
+		if len(dstCallid) != 0 || ceSrc != nil || ceDst != nil ||
+			disablePeriodicStats {
 			if LockCallEntry(ce) {
+				if disablePeriodicStats {
+					ce.EvFlags |= EvNoPeriodicStatsF
+				}
 				if len(dstCallid) != 0 {
 					cid := ce.Key.GetCallID()
 					copied = copy(dstCallid, cid)
@@ -616,8 +632,8 @@ func (h *RTPStreamHash) updateStatsAndRefCallEntry(dst, src NetInfo,
 				}
 				UnlockCallEntry(ce)
 			} else {
-				WARN("failed to lock callentry %p" +
-					" (removed from hash?)\n")
+				WARN("failed to lock callentry %p"+
+					" (removed from hash?)\n", ce)
 			}
 		}
 		if outCE != nil {
@@ -678,7 +694,7 @@ func (h *RTPStreamHash) Stats() HStats {
 // Parameters:
 // start - skip start matching entries
 // max   - stop after printing max entries
-// rateVal - rate value as interger. The comparison direction is given by
+// rateVal - rate value as integer. The comparison direction is given by
 //            the sign (+ get rates >= rateVal, - get rates < -rateVal)
 // net   - ip network to match against
 // re    - if set, a regexp to match the IP against
@@ -696,35 +712,36 @@ func (h *RTPStreamHash) PrintFilter(w io.Writer,
 			print, rate := e.Stream.matchLong(rateVal, net, re, now)
 			if print && n >= start {
 				printed++
+				stats := e.Stream.TotalStats()
 				fmt.Fprintf(w, "%6d. %s created %s (%s ago)\n",
 					n, e.String(),
-					e.Stream.Stats.Rate.T0.Truncate(time.Second),
-					now.Sub(e.Stream.Stats.Rate.T0).Truncate(time.Second),
+					stats.Rate.T0.Truncate(time.Second),
+					now.Sub(stats.Rate.T0).Truncate(time.Second),
 				)
 				fmt.Fprintf(w, "rtp    payload: %d  clk rate: %6d"+
 					"  ssrc: %6d (changes: %d)\n",
-					e.Stream.Stats.RTPPayloadType,
-					e.Stream.Stats.RTPSampleRate,
-					e.Stream.Stats.RTPssrc.Load(), e.Stream.Stats.RTPssrcChanges.Load())
+					stats.RTPPayloadType,
+					stats.RTPSampleRate,
+					stats.RTPssrc, stats.RTPssrcChanges)
 				fmt.Fprintf(w, "rtp    pkts: %5d  bytes: %9d Kb\n",
-					e.Stream.Stats.RTPpkts.Load(),
-					e.Stream.Stats.RTPbytes.Load()/1024,
+					stats.RTPpkts,
+					stats.RTPbytes/1024,
 				)
 				fmt.Fprintf(w, "total  pkts: %5d  bytes: %9d Kb\n",
-					e.Stream.Stats.Pkts.Load(),
-					e.Stream.Stats.Bytes.Load()/1024,
+					stats.Pkts,
+					stats.Bytes/1024,
 				)
-				if e.Stream.Stats.Rate.Bytes.Delta != 0 {
+				if stats.Rate.Bytes.Delta != 0 {
 					fmt.Fprintf(w, "       rate:  %7.2f (old: %7.2f) / %s"+
 						" (u: %v ago)\n",
-						rate, e.Stream.Stats.Rate.Bytes.Rate,
-						e.Stream.Stats.Rate.Bytes.Delta,
-						now.Sub(e.Stream.Stats.Rate.Bytes.Updated))
+						rate, stats.Rate.Bytes.Rate,
+						stats.Rate.Bytes.Delta,
+						now.Sub(stats.Rate.Bytes.Updated))
 
 				}
-				if e.Stream.Stats.RTPSampleRate != 0 {
-					jitter, jitterMS := e.Stream.Stats.Jitter()
-					loss := e.Stream.Stats.Loss()
+				if stats.RTPSampleRate != 0 {
+					jitter, jitterMS := stats.Jitter()
+					loss := stats.Loss()
 					fmt.Fprintf(w, "       jitter:%7.2f (%7.2f ms)"+
 						" loss: %2.2f%%\n",
 						jitter, jitterMS, loss)

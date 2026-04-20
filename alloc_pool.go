@@ -40,8 +40,8 @@ func init() {
 // The Key.buf will be keySize bytes length and info.buf infoSize.
 // It might return nil if the memory limits are exceeded.
 // Note: this version allocates a separate CallEntry and a buffer using
-//       a sync.pool array for the various requested sizes
-//       (the size is round-up to AllocRoundTo).
+// a sync.pool array for the various requested sizes
+// (the size is round-up to AllocRoundTo).
 func AllocCallEntry(keySize, infoSize uint) *CallEntry {
 	var n *CallEntry
 	CallEntryAllocStats.NewCalls.Inc(1)

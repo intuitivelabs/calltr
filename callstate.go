@@ -287,6 +287,27 @@ func (s CallState) TimeoutS() uint {
 	return uint(GetCfg().stateTimeoutS[s])
 }
 
+// ActiveInvite returns true if the callstate corresponds to an active
+// INVITE initiated call
+func (s CallState) ActiveInvite() bool {
+	switch s {
+	case CallStFInv, CallStEarlyDlg, CallStEstablished:
+		return true
+	}
+	return false
+}
+
+// Invite returns true if the call state is related to an INVITE initiated
+// call
+func (s CallState) Invite() bool {
+	switch s {
+	case CallStFInv, CallStEarlyDlg, CallStEstablished,
+		CallStCanceled, CallStBye, CallStByeReplied, CallStNegReply:
+		return true
+	}
+	return false
+}
+
 // StateTimeoutRange returns the valid timeout range (in seconds)
 // for the corresponding call state s.
 func StateTimeoutRange(s CallState) (uint, uint) {
@@ -1038,12 +1059,13 @@ func (c *CallEntry) Ref() int32 {
 // Unref decrements the reference counter and if 0 frees the CallEntry.
 // Returns true if the CallEntry was freed and false if it's still referenced
 func (c *CallEntry) Unref() bool {
-	return c.UnrefN(1)
+	return c.UnrefN(1) <= 0
 }
 
 // UnrefN decrements the reference counter by n and if 0 frees the CallEntry.
-// Returns true if the CallEntry was freed and false if it's still referenced
-func (c *CallEntry) UnrefN(n uint32) bool {
+// Returns the number of references, after Unref (0 if the CallEntry was
+// freed)
+func (c *CallEntry) UnrefN(n uint32) int32 {
 	v := atomic.AddInt32(&c.refCnt, -int32(n))
 	if v < 0 {
 		BUG("CallEntry.UnrefN(%d): %d refCnt less then 0\n",
@@ -1090,13 +1112,15 @@ func (c *CallEntry) UnrefN(n uint32) bool {
 			c.sdp[1] = nil
 		}
 		FreeCallEntry(c)
-		return true
+		return 0
 	}
-	return false
+	return v
 }
 
 // UnrefCleanUnsafe will free/clean all the extras linked to a
 // CallEntry that is _not_ in the hash.
+// It returns the number of remaining references to the CallEntry
+// (0 if none/freed)
 // WARNING: make sure first that the CallEntry is not in the hash
 // (e.g. call unlinkCallEntryUnsafe() first).
 // The current version frees the reg cache linked entry and the
@@ -1106,7 +1130,7 @@ func (c *CallEntry) UnrefN(n uint32) bool {
 // the parent CallEntry).
 // If unref is false it will still keep a ref. to
 // the CallEntry.
-func (c *CallEntry) UnrefCleanUnsafe(unref bool) {
+func (c *CallEntry) UnrefCleanUnsafe(unref bool) int32 {
 	re := c.regBinding
 	rtpSession := c.rtpSession
 	rmRefs := uint32(0)
@@ -1139,11 +1163,13 @@ func (c *CallEntry) UnrefCleanUnsafe(unref bool) {
 		c.rtpSession = nil
 		rtpSession.Unref()
 	}
+	var refs int32
 	if unref {
-		c.UnrefN(rmRefs + 1)
+		refs = c.UnrefN(rmRefs + 1)
 	} else {
-		c.UnrefN(rmRefs)
+		refs = c.UnrefN(rmRefs)
 	}
+	return refs
 }
 
 // lastState returns the last state and true if there is a last state

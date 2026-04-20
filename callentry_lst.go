@@ -173,8 +173,8 @@ func (lst *CallEntryLst) Detached(e *CallEntry) bool {
 	return e == e.next
 }
 
-// iterates on the entire lists calling f(e) for each element, until
-// false is returned or the lists ends.
+// iterates on the entire list calling f(e) for each element, until
+// false is returned or the list ends.
 // WARNING: does not support removing the current element from f, see
 // ForEachSafeRm().
 func (lst *CallEntryLst) ForEach(f func(e *CallEntry) bool) {
@@ -184,8 +184,8 @@ func (lst *CallEntryLst) ForEach(f func(e *CallEntry) bool) {
 	}
 }
 
-// iterates on the entire lists calling f(e) for each element, until
-// false is returned or the lists ends.
+// iterates on the entire list calling f(e) for each element, until
+// false is returned or the list ends.
 func (lst *CallEntryLst) ForEachSafeRm(f func(e *CallEntry, l *CallEntryLst) bool) {
 	cont := true
 	s := lst.head.next

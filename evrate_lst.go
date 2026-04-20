@@ -187,7 +187,7 @@ func SetForceGCrunL(c *EvRateGCcfg, runt *[]time.Duration) {
 }
 
 // SetLighGCparams set the internal parameters for the light GC:
-//  the entry life "expire" ime and the running limit for the GC.
+// the entry life "expire" ime and the running limit for the GC.
 func SetLightGCparams(c *EvRateGCcfg, lifetime, runLim time.Duration) {
 	atomic.StoreInt64((*int64)(&c.LightGCtimeL), int64(lifetime))
 	atomic.StoreInt64((*int64)(&c.LightGCrunL), int64(runLim))
@@ -273,8 +273,8 @@ func (h *EvRateHash) Hash(src NetInfo, Ev EventType) uint32 {
 // maximum entries (if exceeded hard GC would be force-run immediately in
 // an attempt to reduce the hash entries to h.gcCfg.TargetMax; if not enough
 // space was created => discard new entries) and a table with the
-//  NEvRates max_rate,interval pairs (each rate is computed on the specified
-//  interval and compared against the corresponding max_rate).
+// NEvRates max_rate,interval pairs (each rate is computed on the specified
+// interval and compared against the corresponding max_rate).
 func (h *EvRateHash) Init(sz, maxEntries uint32, maxRates *EvRateMaxes) {
 	h.HTable = make([]EvRateEntryLst, sz)
 	for i := 0; i < len(h.HTable); i++ {
@@ -560,12 +560,12 @@ func (h *EvRateHash) lightGC(target uint32, now timestamp.TS) (bool,
 // IncUpdate will search and update the entry in the hash corresponding
 // to (ev, src).
 // crtT should contain the time when this function is run.
-// The return values are: - a bool which is true on success (updated existing
-// entry or created new one) of false on failure (could not create new entry).
-//                        - the index of the exceeded rate (-1 if none was
-//                          exceeded
-//                        - the current value of the exceeded rate (or 0.0)
-//                        - the rate exceeded info/state (EvExcInfo)
+// The return values are:
+//   - a bool which is true on success (updated existing entry or created
+//     new one) or false on failure (could not create new entry).
+//   - the index of the exceeded rate (-1 if none was exceeded)
+//   - the current value of the exceeded rate (or 0.0)
+//   - the rate exceeded info/state (EvExcInfo)
 func (h *EvRateHash) IncUpdate(ev EventType, src NetInfo,
 	crtT timestamp.TS) (bool, int, float64, EvExcInfo) {
 	var rIdx int
@@ -749,15 +749,15 @@ func (h *EvRateHash) getNextExceededLock(bIdx, bPos uint, val bool) (*EvRateEntr
 // limit rLim, it walked more then maxE elements or if it walked the whole
 // list.
 // Parameters:
-//    m        - MatchEvRTS structure containing the exceeded state to match
-//               against and various timestamps.
-//    first    - list element from which to start the search
-//    lst      - list (first must be a part of it)
-//    maxE     - maximum entries that should be checked
-//    target   - stop if total entries < target
-//    rLim     - time limit, stop if exceeded
-//    chkTo    - check the time limit (rLim) every chkTo entries
-//    chkoffs  - initial offset for checking the time limit
+//	m        - MatchEvRTS structure containing the exceeded state to match
+//	           against and various timestamps.
+//	first    - list element from which to start the search
+//	lst      - list (first must be a part of it)
+//	maxE     - maximum entries that should be checked
+//	target   - stop if total entries < target
+//	rLim     - time limit, stop if exceeded
+//	chkTo    - check the time limit (rLim) every chkTo entries
+//	chkoffs  - initial offset for checking the time limit
 //
 // Any of the time limits can be 0 (timestamp.Zero()), in which case it will
 // be ignored (matches always).
@@ -798,7 +798,7 @@ func (h *EvRateHash) evictLst(m MatchEvRTS,
 
 // ForceEvict will try very hard to free entries until target is reached or
 // rLim (time limit) is exceeded.
-// All the matching entries (matching m, with older time stamps) wil be freed.
+// All the matching entries (matching m, with older time stamps) will be freed.
 // Any  0 timestamp in m will disable the respective check.
 // A 0 rLim will disable the runtime limit.
 // The parameters are:
