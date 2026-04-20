@@ -214,3 +214,39 @@ func RTPSampleRate(payloadType RTPcodec) uint32 {
 	}
 	return 0 // unknown
 }
+
+// FindSampleRate tries to find the sample rate for the given codec and media
+// type, using provided arrays of negotiated payload types and clock rates.
+// If it fails to find a match it fails back to default codec based sample
+// rates (RTPSampleRate()) and it that fails too it guesses based on the
+// media type.
+// If no sample rate could be found/guessed it returns 0.
+func FindSampleRate(
+	payloadT RTPcodec, mediaType MediaType,
+	payloadTypes []uint8, clkRates []uint) uint32 {
+	sampleRate := -1
+	for i, pt := range payloadTypes {
+		if RTPcodec(pt) == payloadT {
+			sampleRate = int(clkRates[i])
+			break
+		}
+	}
+	if sampleRate <= 0 {
+		// sampleRate not found
+		sampleRate = int(RTPSampleRate(payloadT))
+		if sampleRate == 0 {
+			switch mediaType {
+			case MediaTypeAudio:
+				sampleRate = 8000 // best guesss
+			case MediaTypeVideo:
+				sampleRate = 90000
+			default:
+				sampleRate = 0
+			}
+			WARN("could not find sample rate for RTP payload %d,"+
+				" guessing %d\n",
+				payloadT, sampleRate)
+		}
+	}
+	return uint32(sampleRate)
+}

@@ -33,15 +33,149 @@ type PktStats struct {
 		Bytes PktRate
 	}
 	RTPdj          djBuf
-	RTPssrc        uint32
+	RTPssrc        atomic.Uint32
+	RTPssrcChanges atomic.Uint32 // how many times did the SSRC change
 	RTPPayloadType RTPcodec
 }
 
+// Set copies the values from another PktStats.
+// (handling atomic values)
+// if partialSet is true, the timestamps, ssrc and ssrcChanges will not be
+// updated
+func (s *PktStats) Set(from *PktStats, partialSet bool) {
+	s.RTPSampleRate = from.RTPSampleRate
+	s.Rate = from.Rate
+	s.RTPdj = from.RTPdj
+	s.RTPPayloadType = from.RTPPayloadType
+
+	if !partialSet {
+		timestamp.AtomicStore(&s.RTPrcvdTS0, timestamp.AtomicLoad(&from.RTPrcvdTS0))
+		timestamp.AtomicStore(&s.RTPrcvdTSn, timestamp.AtomicLoad(&from.RTPrcvdTSn))
+		s.RTPssrc.Store(from.RTPssrc.Load())
+		s.RTPssrcChanges.Store(from.RTPssrcChanges.Load())
+	}
+	s.Pkts.Store(from.Pkts.Load())
+	s.Bytes.Store(from.Bytes.Load())
+	s.RTPpkts.Store(from.RTPpkts.Load())
+	s.RTPbytes.Store(from.RTPbytes.Load())
+	s.RTPexpected.Store(from.RTPexpected.Load())
+	s.RTPpktTS0.Store(from.RTPpktTS0.Load())
+	s.RTPpktTSn.Store(from.RTPpktTSn.Load())
+	s.RTPSeqNo.Store(from.RTPSeqNo.Load())
+	s.RTPSeqNo0.Store(from.RTPSeqNo0.Load())
+	s.RTPJitter16.Store(from.RTPJitter16.Load())
+}
+
+// Update uses the values from another PktStats to update the
+// current statistics, if the time intervals do not overlap
+func (s *PktStats) Update(from *PktStats) bool {
+	fromT0 := timestamp.AtomicLoad(&from.RTPrcvdTS0)
+	t0 := timestamp.AtomicLoad(&s.RTPrcvdTS0)
+	if timestamp.AtomicCompareAndSwap(&s.RTPrcvdTS0, timestamp.Zero(), fromT0) {
+		// old value was zero => init using "from"
+		s.Set(from, false)
+		return true
+	}
+	fromTn := timestamp.AtomicLoad(&from.RTPrcvdTSn)
+	tn := timestamp.AtomicLoad(&s.RTPrcvdTSn)
+	// new statistic block after (allow <1s overlap)
+	if fromT0.Equal(tn) || fromT0.After(tn) ||
+		(fromTn.After(tn) && tn.Sub(fromT0) < time.Second) {
+		timestamp.AtomicStore(&s.RTPrcvdTSn, fromTn)
+		// s.RTPrcvdT0 remains the same
+		// s.RTPpktTS0 remains the same
+		s.RTPpktTSn.Store(from.RTPpktTSn.Load())
+
+		// check SSRC: if it changed overwrite most of the
+		// stats with the values from "from", otherwise just
+		// "add" the stats
+		newSSRC := from.RTPssrc.Load()
+		oldSSRC := s.RTPssrc.Swap(newSSRC)
+		if oldSSRC != newSSRC {
+			s.Set(from, true)       // don't set TS, ssrc, ...
+			s.RTPssrcChanges.Add(1) // ssrc changed
+			return true
+		}
+
+		// fix RTPdj.PktStats
+		// FIXME: switch either everything to non-atomic
+		// (and change under rtp hash lock) or everything to
+		// atomic, including djstats
+		s.RTPdj.Stats.TotalQueued += from.RTPdj.Stats.TotalQueued
+		s.RTPdj.Stats.Dups += from.RTPdj.Stats.Dups
+		s.RTPdj.Stats.DropOld += from.RTPdj.Stats.DropOld
+		s.RTPdj.Stats.OutOfOrder += from.RTPdj.Stats.OutOfOrder
+
+		s.RTPSampleRate = from.RTPSampleRate
+		s.Rate = from.Rate
+		s.RTPPayloadType = from.RTPPayloadType
+
+		s.Pkts.Add(from.Pkts.Load())
+		s.Bytes.Add(from.Bytes.Load())
+		s.RTPpkts.Add(from.RTPpkts.Load())
+		s.RTPbytes.Add(from.RTPbytes.Load())
+		s.RTPexpected.Add(from.RTPexpected.Load())
+		s.RTPSeqNo.Store(from.RTPSeqNo.Load())
+		// s.RTPSeqNo0 remains the same
+		s.RTPJitter16.Store(from.RTPJitter16.Load())
+		return true
+	}
+	// new statistic block before current one
+	if fromTn.Before(t0) || fromTn.Equal(t0) ||
+		(fromT0.Before(t0) && fromTn.Sub(t0) < time.Second) {
+		timestamp.AtomicStore(&s.RTPrcvdTS0, fromT0)
+		// s.RTPrcvdTn remains the same
+		// s.RTPpktTSn remains the same
+		s.RTPpktTS0.Store(from.RTPpktTS0.Load())
+		if from.RTPssrc.Load() != s.RTPssrc.Load() {
+			// ssrc changed and the one from "from" is
+			// older => ignore all the counter updates
+			// since we already "counted" them on ssrc change
+			return true
+		}
+		// fix RTPdj.PktStats
+		// FIXME: switch either everything to non-atomic
+		// (and change under rtp hash lock) or everything to
+		// atomic, including djstats
+		s.RTPdj.Stats.TotalQueued += from.RTPdj.Stats.TotalQueued
+		s.RTPdj.Stats.Dups += from.RTPdj.Stats.Dups
+		s.RTPdj.Stats.DropOld += from.RTPdj.Stats.DropOld
+		s.RTPdj.Stats.OutOfOrder += from.RTPdj.Stats.OutOfOrder
+
+		// s.RTPSampleRate = from.RTPSampleRate
+		// s.Rate = from.Rate
+		// s.RTPssrc = from.RTPssrc
+		// s.RTPPayloadType = from.RTPPayloadType
+
+		s.Pkts.Add(from.Pkts.Load()) // add missing packets
+		s.Bytes.Add(from.Bytes.Load())
+		s.RTPpkts.Add(from.RTPpkts.Load())
+		s.RTPbytes.Add(from.RTPbytes.Load())
+		s.RTPexpected.Add(from.RTPexpected.Load())
+		s.RTPSeqNo0.Store(from.RTPSeqNo0.Load())
+		// s.RTPSeqNo remains the same
+		// old: s.RTPJitter16.Store(from.RTPJitter16.Load())
+		return true
+	}
+	// new statistics overlaps somehow the current times
+	// interval => ignore
+	return false
+}
+
 func (s *PktStats) Init() {
-	s.RTPrcvdTS0 = timestamp.Zero()
-	s.RTPpktTS0.Store(0)
-	s.RTPSeqNo0.Store(0)
-	s.RTPSampleRate = 0
+	/*
+		timestamp.AtomicStore(&s.RTPrcvdTS0, timestamp.Zero())
+		s.RTPpktTS0.Store(0)
+		s.RTPSeqNo0.Store(0)
+		s.RTPSampleRate = 0
+		s.RTPdj.Reset()
+	*/
+	s.Reset()
+}
+
+func (s *PktStats) Reset() {
+	var zero PktStats
+	s.Set(&zero, false)
 	s.RTPdj.Reset()
 }
 
@@ -73,12 +207,14 @@ func (s *PktStats) ComputeRateStart(crtT timestamp.TS) (float64, bool) {
 
 // compute RTP rate between first packet and last packet received times.
 func (s *PktStats) ComputeOverallRTPrate() (float64, bool) {
-	return computeRate(s.RTPrcvdTSn, s.RTPrcvdTS0, s.RTPpkts.Load())
+	return computeRate(timestamp.AtomicLoad(&s.RTPrcvdTSn),
+		timestamp.AtomicLoad(&s.RTPrcvdTS0), s.RTPpkts.Load())
 }
 
 // compute bytes rate between first packet and last packet received times.
 func (s *PktStats) ComputeOverallBytesRate() (float64, bool) {
-	return computeRate(s.RTPrcvdTSn, s.Rate.T0, s.Bytes.Load())
+	return computeRate(timestamp.AtomicLoad(&s.RTPrcvdTSn),
+		s.Rate.T0, s.Bytes.Load())
 }
 
 func (s *PktStats) AddPktSz(size uint32) {
@@ -169,35 +305,16 @@ func (s *PktStats) AddRTPpkt(pkt []byte, ts timestamp.TS,
 		timestamp.AtomicCompareAndSwap(&s.RTPrcvdTS0, timestamp.Zero(), ts)
 		s.RTPpktTS0.CompareAndSwap(0, uint32(rtph.TS))
 		s.RTPSeqNo0.CompareAndSwap(0, uint32(rtph.SeqNo))
-		sampleRate := -1
-		for i, pt := range payloadTypes {
-			if RTPcodec(pt) == rtph.PayloadType {
-				sampleRate = int(clkRates[i])
-				break
-			}
-		}
-		if sampleRate <= 0 {
-			// sampleRate not found
-			sampleRate = int(RTPSampleRate(rtph.PayloadType))
-			if sampleRate == 0 {
-				switch mediaType {
-				case MediaTypeAudio:
-					sampleRate = 8000 // best guesss
-				case MediaTypeVideo:
-					sampleRate = 90000
-				default:
-					sampleRate = 0
-				}
-				WARN("could not find sample rate for RTP payload %d,"+
-					" guessing %d\n",
-					rtph.PayloadType, sampleRate)
-			}
-		}
-		s.RTPSampleRate = uint32(sampleRate)
+		s.RTPSampleRate = FindSampleRate(rtph.PayloadType, mediaType,
+			payloadTypes, clkRates)
 		s.RTPPayloadType = rtph.PayloadType
-		s.RTPssrc = rtph.SSRC
+		s.RTPssrc.Store(rtph.SSRC)
 	} else {
 		// not first packet
+		oldSSRC := s.RTPssrc.Swap(rtph.SSRC)
+		if oldSSRC != rtph.SSRC {
+			s.RTPssrcChanges.Add(1)
+		}
 		// compute delay, jitter, but only if packet is newer then the last one
 		// (taking into account possible 16 bit wrap arround)
 		if (s.RTPSampleRate > 0) &&

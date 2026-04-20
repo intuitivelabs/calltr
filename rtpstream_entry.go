@@ -51,7 +51,7 @@ type RTPStreamData struct {
 	ClkRates   [SDPmaxFormats]uint  // corresponding sample rate
 }
 
-func (rd RTPStreamData) String() string {
+func (rd *RTPStreamData) String() string {
 	return fmt.Sprintf("%s:%d <- %s:%d (%x)",
 		rd.Dst.IP().String(), rd.Dst.Port,
 		rd.Src.IP().String(), rd.Src.Port, rd.Flags)
@@ -230,7 +230,7 @@ type RTPStreamEntry struct {
 
 func (rse *RTPStreamEntry) String() string {
 	return fmt.Sprintf("%s [h: %d] mline: %d side: %d",
-		rse.Stream, rse.hashNo.Load(), rse.mline, rse.side)
+		&rse.Stream, rse.hashNo.Load(), rse.mline, rse.side)
 }
 
 func (rse *RTPStreamEntry) Init(rtpSess *RTPSession, mline, side uint8) {
