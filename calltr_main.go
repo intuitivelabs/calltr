@@ -830,6 +830,50 @@ func unlinkCallEntryUnsafe(e *CallEntry, unref bool) bool {
 	return unlinked
 }
 
+// TrackedCallID checks if there is a tracked call with the provided callid.
+// Return true if at least one call/branch was found, false otherwise.
+func TrackedCallID(callid []byte) bool {
+	hashNo := cstHash.Hash(callid, 0, int(len(callid)))
+	cstHash.HTable[hashNo].Lock()
+	_, found := cstHash.HTable[hashNo].FindCallID(callid)
+	cstHash.HTable[hashNo].Unlock()
+	return found
+}
+
+// TrackedMsg returns true if the passed message correspond or is related to
+// an already tracked call.
+// It tries to handle partially parsed messages, if it has at least the Call-ID parsed.
+// It returns true if a corresponding call exists and the match type
+// (CallCallIDMatch, CallPartialMatch or CallFullMatch).
+func TrackedMsg(m *sipsp.PSIPMsg, n [2]NetInfo) (bool, CallMatchType) {
+	if !m.HL.PFlags.Test(sipsp.HdrCallID) {
+		// message is to broken
+		return false, CallErrMatch
+	}
+	if !m.HL.PFlags.Any(sipsp.HdrFrom, sipsp.HdrTo) {
+		// if neither to or from is set, revert to callid lookup
+		if TrackedCallID(m.PV.GetCallID().CallID.Get(m.Buf)) {
+			return true, CallCallIDMatch
+		}
+		return false, CallNoMatch
+	}
+	hashNo := cstHash.Hash(m.Buf, int(m.PV.Callid.CallID.Offs),
+		int(m.PV.Callid.CallID.Len))
+
+	cstHash.HTable[hashNo].Lock()
+	e, match, _ := cstHash.HTable[hashNo].Find(m.PV.Callid.CallID.Get(m.Buf),
+		m.PV.From.Tag.Get(m.Buf),
+		m.PV.To.Tag.Get(m.Buf),
+		m.PV.CSeq.CSeqNo,
+		m.FL.Status,
+		m.Method())
+	cstHash.HTable[hashNo].Unlock()
+	if e != nil {
+		return true, match
+	}
+	return false, CallNoMatch
+}
+
 // ProcessMsg tries to match a sip msg against stored call state.
 // Depending on flags it will update the call state based on msg, create
 // new call entries if needed a.s.o.
@@ -1053,7 +1097,14 @@ errorLocked:
 	return nil, CallErrMatch, 0, EvNone, EvSDPNone
 }
 
-func Track(m *sipsp.PSIPMsg, n [2]NetInfo, f HandleEvF) bool {
+// Track will start calll-tracking the passed message.
+// It returns true on success and whether or not the message matched an existing call:
+//
+//	CallNoMatch (new call-entry was created),
+//	CallPartialMatch (partial match on an existing call, possible fork/branch created),
+//	CallCallIDMatch  (only callid matched, possible fork/branch created) or
+//	CallFullMatch (message fully matched an existing call)
+func Track(m *sipsp.PSIPMsg, n [2]NetInfo, f HandleEvF) (bool, CallMatchType) {
 	var evd *EventData
 	var sdpEvd *EventData
 	if f != nil { // TODO: callbacks via f param are obsolete (slow)
@@ -1111,7 +1162,7 @@ func Track(m *sipsp.PSIPMsg, n [2]NetInfo, f HandleEvF) bool {
 			WARN("XXX: ev event not empty bug ignored e == nil: %s (%d) match %d\n", ev, ev, match)
 		}
 	}
-	return match != CallErrMatch
+	return match != CallErrMatch, match
 }
 
 // updateRegCache creates/deletes RegCache binding entries in function of

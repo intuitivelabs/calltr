@@ -9,6 +9,7 @@ package calltr
 import (
 	"bytes"
 	"sync"
+
 	//sync "github.com/sasha-s/go-deadlock"
 
 	"github.com/intuitivelabs/counters"
@@ -175,7 +176,7 @@ func (lst *CallEntryLst) Detached(e *CallEntry) bool {
 // iterates on the entire lists calling f(e) for each element, until
 // false is returned or the lists ends.
 // WARNING: does not support removing the current element from f, see
-//          ForEachSafeRm().
+// ForEachSafeRm().
 func (lst *CallEntryLst) ForEach(f func(e *CallEntry) bool) {
 	cont := true
 	for v := lst.head.next; v != &lst.head && cont; v = v.next {
@@ -248,6 +249,23 @@ func (lst *CallEntryLst) Find(callid, ftag, ttag []byte, cseq uint32,
 		return nil, CallNoMatch, 0
 	}
 	return partialMatch, CallPartialMatch, partialMDir
+}
+
+// FindCallID is similar to the Find above, but it check only for a matching callid
+// (faster when then Find, when only checking for callid).
+// It looks for a call entry corresponding to the given callid.
+// It returns the first matching CallEntry and true on match, false otherwise.
+// It does not use internal locking. Call it between Lock() / Unlock() to
+// be concurrency safe.
+func (lst *CallEntryLst) FindCallID(callid []byte) (*CallEntry, bool) {
+
+	for e := lst.head.next; e != &lst.head; e = e.next {
+		mt, _ := e.match(callid, nil, nil)
+		if mt != CallNoMatch && mt != CallErrMatch {
+			return e, true
+		}
+	}
+	return nil, false
 }
 
 // GetAllRelatedEvFlags iterates on all the related entries and returns
@@ -399,7 +417,8 @@ func choosePartialMatch(e1 *CallEntry, dir1 int, e2 *CallEntry, dir2 int,
 */
 
 // pick the best callid-only match between 2 CallEntry-s (with the same
-//  callid), for a message with a given cseq and reply status
+// callid), for a message with a given cseq and reply status
+//
 // (status == 0 for a request).
 // dir1 & dir2 are the match directions for the respective CallEntry-s.
 // Returns "best" matching call entry
